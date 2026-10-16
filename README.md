@@ -71,7 +71,6 @@ The MPLS L3VPN architecture relies on a hierarchical **Two-Label Stack** (`Label
 3. **Recursive Next-Hop Resolution:** `PE1_HN` receives the VPNv4 route with Next-Hop `10.0.0.3`. To forward traffic toward `10.0.0.3`, `PE1_HN` performs a recursive lookup in its global CEF table, matching the LDP-assigned Transport Label (e.g., `Label 16`) learned from `P1_Core`.
 
 #### B. Data Plane Forwarding Walk-Through (`CE1_Hanoi` $\rightarrow$ `CE2_HCM`)
-```text
 +-----------------------------------------------------------------------------------+
 | 1. CE1 -> PE1 : [ IPv4 Payload (Src: 192.168.10.1 -> Dst: 192.168.20.1) ]         |
 | 2. PE1 -> P1  : [ Outer LDP Label (16) ] [ Inner VPN Label (19) ] [ IPv4 Payload ]|
