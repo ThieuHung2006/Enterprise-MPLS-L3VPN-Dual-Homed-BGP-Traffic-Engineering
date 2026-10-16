@@ -167,12 +167,19 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 ## 6. Verification
 
 ### 6.1 Underlay: OSPF and LDP
+<p align="center">
+  <img src="images/p1-core-ospf-neighbor.png" alt="P1 OSPF Neighbor">
+  <br>
+  <i><b>Figure 1:</b> <code>show ip ospf neighbor</code> on P1_Core. All transit adjacencies are FULL.</i>
+</p>
 
-![P1 OSPF Neighbor](images/p1-core-ospf-neighbor.png)
-![P1 LDP Neighbor](images/p1-core-mpls-ldp-neighbor.png)
+<br>
 
-- `show ip ospf neighbor` on `P1_Core`: all transit adjacencies are `FULL`.
-- `show mpls ldp neighbor`: all LDP sessions are `Oper` over TCP 646, anchored to loopbacks through `mpls ldp router-id Loopback0 force`. The `:0` suffix denotes a per-platform label space.
+<p align="center">
+  <img src="images/p1-core-mpls-ldp-neighbor.png" alt="P1 LDP Neighbor">
+  <br>
+  <i><b>Figure 2:</b> <code>show mpls ldp neighbor</code> on P1_Core. All LDP sessions are Oper over TCP 646, anchored to loopbacks through <code>mpls ldp router-id Loopback0 force</code>. The :0 suffix denotes a per-platform label space.</i>
+</p>
 
 ### 6.2 BGP-free core
 
