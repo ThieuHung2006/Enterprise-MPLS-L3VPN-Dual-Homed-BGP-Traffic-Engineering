@@ -236,27 +236,10 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
   <i><b>Figure 9:</b> <code>show ip bgp 203.0.113.128</code> on ISP2_AS200: the prefix arrives with the elongated path <code>65000 65000 65000 65000 i</code> via AS-Path Prepending.</i>
 </p>
 
-### 6.4 Upstream traffic engineering
-
-<p align="center">
-  <img src="images/asbr1-bgp-outbound-local-pref.png" alt="ASBR1 Outbound LocalPref">
-  <br>
-  <i><b>Figure 8:</b> <code>show ip bgp 8.8.8.8</code> on ASBR1_Core: the path via ISP1 (<code>203.0.113.2</code>) has <code>localpref 200</code> and is selected as best; the path via ISP2 (<code>203.0.113.6</code>) keeps <code>localpref 100</code>.</i>
-</p>
-
-<br>
-
-<p align="center">
-  <img src="images/isp2-bgp-inbound-as-path-prepend.png" alt="ISP2 Inbound Prepending">
-  <br>
-  <i><b>Figure 9:</b> <code>show ip bgp 203.0.113.128</code> on ISP2_AS200: the prefix arrives with the elongated path <code>65000 65000 65000 65000 i</code> via AS-Path Prepending.</i>
-</p>
-
-</p>
 ### 6.5 Second tenant (`VRF_CORP_B`) and shared-CE analysis
 
 <p align="center">
-  <img src="pe1-show-ip-vrf.png" alt="PE1 VRF list">
+  <img src="images/pe1-show-ip-vrf.png" alt="PE1 VRF list">
   <br>
   <i><b>Figure 10:</b> <code>show ip vrf</code> on PE1_HN showing VRF allocations for CORP_A and CORP_B.</i>
 </p>
@@ -264,7 +247,7 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 <br>
 
 <p align="center">
-  <img src="pe1-vrf-corp-b-route.png" alt="PE1 VRF_CORP_B routing table">
+  <img src="images/pe1-vrf-corp-b-routing-table.png" alt="PE1 VRF_CORP_B routing table">
   <br>
   <i><b>Figure 11:</b> <code>show ip route vrf VRF_CORP_B</code> on PE1_HN.</i>
 </p>
@@ -303,11 +286,6 @@ The PE-side VRFs are not the source of this leak. The shared CE is the bridge be
 
 ```text
 ! Proposed fix on CE1_Hanoi (not yet applied)
-ip prefix-list PL_A_OUT seq 5 permit 192.168.10.0/24
-ip prefix-list PL_B_OUT seq 5 permit 192.168.100.0/24
-router bgp 65001
- neighbor <PE1 VLAN10 peer> prefix-list PL_A_OUT out
- neighbor 10.10.20.2        prefix-list PL_B_OUT out
 ip prefix-list PL_A_OUT seq 5 permit 192.168.10.0/24
 ip prefix-list PL_B_OUT seq 5 permit 192.168.100.0/24
 router bgp 65001
