@@ -176,8 +176,8 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 
 ### 6.2 BGP-free core
 
-![P1 BGP Free Core](p1-core-bgp-free-verification.png)
-![P1 LFIB Table](p1-core-mpls-forwarding-table.png)
+![P1 BGP Free Core](images/p1-core-bgp-free-rib.png)
+![P1 LFIB Table](images/p1-core-mpls-forwarding-table.png)
 
 - `show ip route 192.168.20.0` on `P1_Core` returns `% Network not in table`: tenant prefixes are absent from the core.
 - `show mpls forwarding-table` shows `Pop Label` toward the PE loopbacks, confirming PHP.
