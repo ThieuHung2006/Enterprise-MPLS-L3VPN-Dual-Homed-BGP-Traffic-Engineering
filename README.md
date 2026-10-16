@@ -239,7 +239,7 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 ### 6.5 Second tenant (`VRF_CORP_B`) and shared-CE analysis
 
 <p align="center">
-  <img src="images/pe1-show-ip-vrf.png" alt="PE1 VRF list">
+  <img src="images/pe1-vrf-corp-b-routing-table.png" alt="PE1 VRF list">
   <br>
   <i><b>Figure 10:</b> <code>show ip vrf</code> on PE1_HN showing VRF allocations for CORP_A and CORP_B.</i>
 </p>
@@ -247,7 +247,7 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 <br>
 
 <p align="center">
-  <img src="images/pe1-vrf-corp-b-routing-table.png" alt="PE1 VRF_CORP_B routing table">
+  <img src="images/pe1-vrf-corp-a-routing-table.png" alt="PE1 VRF_CORP_B routing table">
   <br>
   <i><b>Figure 11:</b> <code>show ip route vrf VRF_CORP_B</code> on PE1_HN.</i>
 </p>
