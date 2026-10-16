@@ -51,21 +51,33 @@ Designed strictly in compliance with service provider architectural standards (*
 
 ---
 
-## 3. Core Architecture & Mechanisms
+## 3. Core Architecture & Technical Deep-Dive
 
-### 3.1. Customer Isolation via VRF
-- **VRF Name**: `VRF_CORP_A`
-- **Route Distinguisher (RD)**: `65000:100` biến prefix IPv4 của doanh nghiệp thành VPNv4 duy nhất trong mạng ISP.
-- **Route Target (RT)**: `65000:100` điều khiển việc Import/Export tuyến đường VPNv4 giữa các PE router.
+### 3.1. Multi-Tenant Isolation & VPNv4 Control Plane (RFC 4364)
+To support overlapping customer IPv4 address spaces across a shared MPLS backbone, the architecture enforces strict routing separation at the Provider Edge (`PE1_HN` and `PE2_HCM`) using Virtual Routing and Forwarding (`VRF_CORP_A`).
 
-### 3.2. Two-Label Stacking & BGP-Free Core
-- **Transport Label (Outer)**: Phân phối bởi giao thức LDP, được router `P1_Core` sử dụng để hoán đổi nhãn (Label Swapping) và chuyển tiếp gói tin tới egress PE kế tiếp. Áp dụng cơ chế **Penultimate Hop Popping (PHP)** tại router P[cite: 5].
-- **VPN Service Label (Inner)**: Phân phối bởi MP-BGP (VPNv4), được egress PE bóc tách để đẩy dữ liệu vào đúng bảng định tuyến của `VRF_CORP_A`[cite: 3].
-- **BGP-Free Core**: `P1_Core` hoàn toàn không tham gia tiến trình BGP và không chứa bất kỳ routing entry nào của mạng doanh nghiệp, giúp giảm tải tối đa phần cứng[cite: 7].
+* **Route Distinguisher (RD `65000:100`) — Uniqueness in BGP:** Standard BGP-4 cannot distinguish between identical IPv4 prefixes belonging to different customers. By prepending an 8-byte RD (`ASN:NN`) to the 4-byte IPv4 prefix, the PE router constructs a globally unique 12-byte (96-bit) **VPNv4 NLRI** (e.g., `65000:100:192.168.10.0/24`). This ensures that route advertisements within the MP-iBGP session never overwrite one another, even when multiple tenants utilize identical RFC 1918 subnets.
+* **Route Target (RT `65000:100`) — Policy-Driven Topology Control:** Unlike the RD, which merely provides uniqueness, the Route Target is an 8-byte **MP-BGP Extended Community** attribute (`rt 65000:100`) that dictates VRF import/export policies. When `PE1_HN` redistributes customer routes from `CE1_Hanoi` (AS 65001) into MP-BGP, it attaches the export RT `65000:100`. Upon receiving the VPNv4 update, `PE2_HCM` evaluates its local VRF import lists, matches `65000:100`, strips the RD, and installs the native IPv4 route into the `VRF_CORP_A` Routing Information Base (RIB).
+* **CEF & LFIB Integration:** Each VRF maintains an isolated Cisco Express Forwarding (CEF) table. When MP-BGP allocates a local **VPN Service Label** (Inner Label) for a customer prefix, it binds that label directly to the VRF's specific adjacency entry in the Label Forwarding Information Base (LFIB).
 
-### 3.3. BGP Traffic Engineering Strategy
-- **Outbound Path Selection**: Áp dụng chính sách gán `Local-Preference 200` cho tuyến đường học từ ISP1 (so với mặc định 100 từ ISP2), ép toàn bộ traffic nội bộ đi ra ngoài qua ISP1[cite: 2].
-- **Inbound Path Selection**: Áp dụng kỹ thuật **AS-Path Prepending** (lặp thêm 3 lần ASN 65000) khi quảng bá prefix công cộng `203.0.113.128/25` sang ISP2, làm tăng độ dài AS-Path để ép Internet bên ngoài ưu tiên trả traffic về qua ISP1[cite: 4].
+---
+
+### 3.2. End-to-End Packet Walk: Control Plane vs. Data Plane
+The MPLS L3VPN architecture relies on a hierarchical **Two-Label Stack** (`Label EtherType 0x8847`) that separates core transport routing from edge service demultiplexing.
+
+#### A. Control Plane Signaling (Bottom-Up Label Binding)
+1. **IGP & Transport Label Distribution:** OSPF Area 0 establishes full reachability between the `/32` Loopback0 interfaces of `PE1_HN` (`10.0.0.1`), `P1_Core` (`10.0.0.2`), and `PE2_HCM` (`10.0.0.3`). Label Distribution Protocol (LDP) operates alongside OSPF, binding local transport labels to each `/32` FEC (Forwarding Equivalence Class) in the LIB (Label Information Base) and programming the hardware LFIB.
+2. **Service Label Signaling:** `CE2_HCM` advertises `192.168.20.0/24` to `PE2_HCM` via eBGP. `PE2_HCM` allocates a local VPN label (e.g., `Label 19`) for this prefix, sets the BGP `Next-Hop` to its own Loopback0 (`10.0.0.3`), and signals the update to `PE1_HN` over the MP-iBGP VPNv4 session.
+3. **Recursive Next-Hop Resolution:** `PE1_HN` receives the VPNv4 route with Next-Hop `10.0.0.3`. To forward traffic toward `10.0.0.3`, `PE1_HN` performs a recursive lookup in its global CEF table, matching the LDP-assigned Transport Label (e.g., `Label 16`) learned from `P1_Core`.
+
+#### B. Data Plane Forwarding Walk-Through (`CE1_Hanoi` $\rightarrow$ `CE2_HCM`)
+```text
++-----------------------------------------------------------------------------------+
+| 1. CE1 -> PE1 : [ IPv4 Payload (Src: 192.168.10.1 -> Dst: 192.168.20.1) ]         |
+| 2. PE1 -> P1  : [ Outer LDP Label (16) ] [ Inner VPN Label (19) ] [ IPv4 Payload ]|
+| 3. P1  -> PE2 : [ Inner VPN Label (19) ] [ IPv4 Payload ]  <-- PHP Pops Top Label |
+| 4. PE2 -> CE2 : [ IPv4 Payload (Src: 192.168.10.1 -> Dst: 192.168.20.1) ]         |
++-----------------------------------------------------------------------------------+
 
 ---
 
