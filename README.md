@@ -71,10 +71,61 @@ The MPLS L3VPN architecture relies on a hierarchical **Two-Label Stack** (`Label
 3. **Recursive Next-Hop Resolution:** `PE1_HN` receives the VPNv4 route with Next-Hop `10.0.0.3`. To forward traffic toward `10.0.0.3`, `PE1_HN` performs a recursive lookup in its global CEF table, matching the LDP-assigned Transport Label (e.g., `Label 16`) learned from `P1_Core`.
 
 #### B. Data Plane Forwarding Walk-Through (`CE1_Hanoi` $\rightarrow$ `CE2_HCM`)
-```text
 +-----------------------------------------------------------------------------------+
 | 1. CE1 -> PE1 : [ IPv4 Payload (Src: 192.168.10.1 -> Dst: 192.168.20.1) ]         |
 | 2. PE1 -> P1  : [ Outer LDP Label (16) ] [ Inner VPN Label (19) ] [ IPv4 Payload ]|
 | 3. P1  -> PE2 : [ Inner VPN Label (19) ] [ IPv4 Payload ]  <-- PHP Pops Top Label |
 | 4. PE2 -> CE2 : [ IPv4 Payload (Src: 192.168.10.1 -> Dst: 192.168.20.1) ]         |
 +-----------------------------------------------------------------------------------+
+
+## 4. Verification & Proof of Concept (PoC)
+
+### 4.1. Core Underlay Infrastructure (OSPF & MPLS LDP Synchronization)
+Before any overlay VPN service can be established, the ISP backbone (`P1_Core`) must achieve full IGP convergence and bind MPLS transport labels to all `/32` Loopback FECs (Forwarding Equivalence Classes).
+
+![P1 OSPF Neighbor](images/p1-core-ospf-neighbor.png)
+![P1 LDP Neighbor](images/p1-core-mpls-ldp-neighbor.png)
+
+**Technical Analysis & Key Observations:**
+* **IGP Adjacency State (`show ip ospf neighbor`):** `P1_Core` maintains full OSPF Area 0 adjacencies (`FULL` state) across all three point-to-point transit links toward `PE1_HN` (`10.0.0.1`), `PE2_HCM` (`10.0.0.3`), and `ASBR1_Core` (`10.0.0.4`). This guarantees deterministic shortest-path reachability between all `/32` Loopback0 addresses, which serve as the next-hop endpoints for MP-iBGP and LDP sessions.
+* **LDP Session Operational Status (`show mpls ldp neighbor`):** All three LDP peers report `State: Oper` over TCP port `646`. The `Peer LDP Ident` field (`10.0.0.1:0`, `10.0.0.3:0`, `10.0.0.4:0`) confirms that `mpls ldp router-id Loopback0 force` is properly binding label distribution sessions to stable loopback interfaces rather than physical transit interfaces.
+* **Label Space (`:0`):** The `:0` suffix indicates **Per-Platform Label Space**, meaning assigned transport labels are globally significant across all interfaces of the router.
+
+---
+
+### 4.2. Validation of the BGP-Free Core Architecture
+A critical design milestone for scalable service provider networks is ensuring core transit routers (`P1_Core`) forward customer traffic solely via hardware label switching without maintaining customer or external BGP prefixes.
+
+![P1 BGP Free Core](images/p1-core-bgp-free-verification.png)
+![P1 LFIB Table](images/p1-core-mpls-forwarding-table.png)
+
+**Technical Analysis & Key Observations:**
+* **Absence of Customer Routes in Core RIB (`show ip route 192.168.20.0`):** Querying `P1_Core`'s global Routing Information Base for customer prefixes (`192.168.10.0/24` and `192.168.20.0/24`) returns `% Network not in table`. `P1_Core` has zero BGP configuration and zero visibility into tenant address spaces, protecting core memory (TCAM/DRAM) from customer route churn.
+* **LFIB Label Swapping & PHP (`show mpls forwarding-table`):** Instead of IP lookups, `P1_Core` inspects the 20-bit outer MPLS label in its Label Forwarding Information Base (LFIB). For traffic destined to egress PEs (`10.0.0.1/32` or `10.0.0.3/32`), the `Outgoing Label` action displays **`Pop Label`** (signaled via LDP `implicit-null` label `3`). This confirms **Penultimate Hop Popping (PHP)** is active, stripping the outer transport label at `P1_Core` so the egress PE only needs to process the inner VPN Service Label.
+
+---
+
+### 4.3. End-to-End MPLS L3VPN Data Plane (`CE1_Hanoi` $\leftrightarrow$ `CE2_HCM`)
+This test validates the MP-iBGP VPNv4 control plane route exchange between `PE1_HN` and `PE2_HCM`, as well as the two-label MPLS data plane forwarding across the isolated customer instance (`VRF_CORP_A`).
+
+![PE1 VPNv4 and VRF Route](images/pe1-vpnv4-vrf-routing.png)
+![CE1 to CE2 Ping and Traceroute](images/ce1-to-ce2-ping-traceroute.png)
+
+**Technical Analysis & Key Observations:**
+* **MP-iBGP VPNv4 Control Plane (`show ip bgp vpnv4 all summary` & `show ip route vrf VRF_CORP_A`):** The MP-iBGP session between `PE1_HN` (`10.0.0.1`) and `PE2_HCM` (`10.0.0.3`) is established and actively exchanging VPNv4 NLRIs (`RD 65000:100`). Inside `VRF_CORP_A`, the remote branch subnet `192.168.20.0/24` is installed via BGP (`B`) with a recursive next-hop pointing to `PE2_HCM`'s Loopback0 (`10.0.0.3`).
+* **End-to-End Reachability & Label Stack Verification (`traceroute 192.168.20.1 source Loopback0`):**
+  1. **Hop 1 (`10.10.1.1` — `PE1_HN`):** Native IPv4 packet enters the ingress VRF interface (`e0/1`), where `PE1_HN` imposes both the inner VPN label and outer LDP transport label.
+  2. **Hop 2 (`172.16.12.2` — `P1_Core`):** ICMP TTL expiration at the transit core reveals the MPLS shim header (`[MPLS: Labels X/Y Exp 0]`), explicitly proving **Two-Label Stacking** in transit (Top = LDP Transport Label, Bottom = MP-BGP VPN Service Label).
+  3. **Hop 3 (`10.10.2.1` — `PE2_HCM`) & Hop 4 (`192.168.20.1` — `CE2_HCM`):** After PHP strips the outer label, `PE2_HCM` pops the inner VPN label, maps the packet to `VRF_CORP_A`, and delivers the native IPv4 payload to `CE2_HCM` with 100% success (`!!!!!`, `1ms` RTT).
+
+---
+
+### 4.4. Deterministic BGP Traffic Engineering (Outbound & Inbound Policies)
+At the autonomous system edge (`ASBR1_Core`), traffic engineering policies are verified to ensure primary utilization of `ISP1_AS100` while maintaining `ISP2_AS200` as an automated standby circuit.
+
+![ASBR1 Outbound LocalPref](images/asbr1-bgp-local-preference.png)
+![ISP2 Inbound Prepending](images/isp2-bgp-as-path-prepending.png)
+
+**Technical Analysis & Key Observations:**
+* **Outbound Traffic Engineering (`show ip bgp 8.8.8.8` on `ASBR1_Core`):** Both upstream providers advertise the global destination `8.8.8.8/32`. The inbound route-map (`RM_FROM_ISP1_IN`) successfully elevates the **Local Preference (`LocPrf`) to `200`** for the path learned from `ISP1_AS100` (`203.0.113.2`), compared to the default `100` from `ISP2_AS200` (`203.0.113.6`). Consequently, the BGP decision process marks `203.0.113.2` with **`*>` (Valid & Best Path)**, steering all outbound traffic through `ISP1_AS100`.
+* **Inbound Traffic Engineering (`show ip bgp 203.0.113.128` on `ISP2_AS200`):** Inspecting the BGP table on the secondary upstream (`ISP2_AS200`) confirms that the outbound route-map (`RM_TO_ISP2_OUT`) artificially elongates the AS-Path to **`65000 65000 65000 65000 i`** (3x prepends). Upstream autonomous systems evaluating path length naturally prefer the un-prepended single-hop path (`65000 i`) via `ISP1_AS100` for return traffic, achieving deterministic bidirectional symmetry.
