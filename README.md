@@ -168,7 +168,7 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 
 ### 6.1 Underlay: OSPF and LDP
 
-![P1 OSPF Neighbor](p1-core-ospf-neighbor.png)
+![P1 OSPF Neighbor](images/p1-core-ospf-neighbor.png)
 ![P1 LDP Neighbor](images/p1-core-mpls-ldp-neighbor.png)
 
 - `show ip ospf neighbor` on `P1_Core`: all transit adjacencies are `FULL`.
