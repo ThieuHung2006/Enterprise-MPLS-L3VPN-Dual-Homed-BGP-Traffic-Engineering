@@ -202,8 +202,8 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 
 ### 6.5 Second tenant (`VRF_CORP_B`) and shared-CE analysis
 
-![PE1 VRF list](images/images/pe1-vrf-corp-a-routing-table.png)
-![PE1 VRF_CORP_B routing table](images/images/pe1-vrf-corp-b-routing-table.png)
+![PE1 VRF list](images/asbr1-bgp-outbound-local-pref.png)
+![PE1 VRF_CORP_B routing table](images/isp2-bgp-inbound-as-path-prepend.png)
 
 **Verified**
 
