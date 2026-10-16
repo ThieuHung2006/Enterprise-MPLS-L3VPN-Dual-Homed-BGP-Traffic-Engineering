@@ -183,34 +183,91 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 
 ### 6.2 BGP-free core
 
-![P1 BGP Free Core](images/p1-core-bgp-free-rib.png)
-![P1 LFIB Table](images/p1-core-mpls-forwarding-table.png)
+<p align="center">
+  <img src="images/p1-core-no-customer-routes.png" alt="P1 BGP Free Core">
+  <br>
+  <i><b>Figure 3:</b> <code>show ip route 192.168.20.0</code> on P1_Core returns <code>% Network not in table</code>: tenant prefixes are absent from the core RIB.</i>
+</p>
 
-- `show ip route 192.168.20.0` on `P1_Core` returns `% Network not in table`: tenant prefixes are absent from the core.
-- `show mpls forwarding-table` shows `Pop Label` toward the PE loopbacks, confirming PHP.
+<br>
+
+<p align="center">
+  <img src="images/p1-core-mpls-forwarding-table.png" alt="P1 LFIB Table">
+  <br>
+  <i><b>Figure 4:</b> <code>show mpls forwarding-table</code> shows <code>Pop Label</code> toward the PE loopbacks, confirming PHP (Penultimate Hop Popping).</i>
+</p>
 
 ### 6.3 End-to-end L3VPN (`VRF_CORP_A`)
 
-![PE1 BGP VPNv4 Summary](images/pe1-bgp-vpnv4-summary.png)
-![PE1 VRF Routing Table](images/pe1-vrf-corp-a-routing-table.png)
-![CE1 to CE2 Ping and Traceroute](images/ce1-l3vpn-traceroute-label-stack.png)
+<p align="center">
+  <img src="images/pe1-bgp-vpnv4-summary.png" alt="PE1 BGP VPNv4 Summary">
+  <br>
+  <i><b>Figure 5:</b> The MP-iBGP VPNv4 session between <code>10.0.0.1</code> and <code>10.0.0.3</code> is Established.</i>
+</p>
 
-- The MP-iBGP VPNv4 session between `10.0.0.1` and `10.0.0.3` is `Established`.
-- In `VRF_CORP_A`, `192.168.20.0/24` is installed via BGP with recursive next hop `10.0.0.3`.
-- Traceroute from `CE1_Hanoi` to `CE2_HCM` shows the label stack at the core hop, and the ping succeeds (`!!!!!`).
+<br>
+
+<p align="center">
+  <img src="images/pe1-vrf-corp-a-routing-table.png" alt="PE1 VRF Routing Table">
+  <br>
+  <i><b>Figure 6:</b> In <code>VRF_CORP_A</code>, <code>192.168.20.0/24</code> is installed via BGP with recursive next hop <code>10.0.0.3</code>.</i>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="images/ce1-l3vpn-traceroute-label-stack.png" alt="CE1 to CE2 Ping and Traceroute">
+  <br>
+  <i><b>Figure 7:</b> Traceroute from CE1_Hanoi to CE2_HCM shows the label stack at the core hop, and the ping succeeds (<code>!!!!!</code>).</i>
+</p>
+### 6.4 Upstream traffic engineering
+
+<p align="center">
+  <img src="images/asbr1-bgp-outbound-local-pref.png" alt="ASBR1 Outbound LocalPref">
+  <br>
+  <i><b>Figure 8:</b> <code>show ip bgp 8.8.8.8</code> on ASBR1_Core: the path via ISP1 (<code>203.0.113.2</code>) has <code>localpref 200</code> and is selected as best; the path via ISP2 (<code>203.0.113.6</code>) keeps <code>localpref 100</code>.</i>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="images/isp2-bgp-inbound-as-path-prepend.png" alt="ISP2 Inbound Prepending">
+  <br>
+  <i><b>Figure 9:</b> <code>show ip bgp 203.0.113.128</code> on ISP2_AS200: the prefix arrives with the elongated path <code>65000 65000 65000 65000 i</code> via AS-Path Prepending.</i>
+</p>
 
 ### 6.4 Upstream traffic engineering
 
-![ASBR1 Outbound LocalPref](images/asbr1-bgp-outbound-local-pref.png)
-![ISP2 Inbound Prepending](images/isp2-bgp-inbound-as-path-prepend.png)
+<p align="center">
+  <img src="images/asbr1-bgp-outbound-local-pref.png" alt="ASBR1 Outbound LocalPref">
+  <br>
+  <i><b>Figure 8:</b> <code>show ip bgp 8.8.8.8</code> on ASBR1_Core: the path via ISP1 (<code>203.0.113.2</code>) has <code>localpref 200</code> and is selected as best; the path via ISP2 (<code>203.0.113.6</code>) keeps <code>localpref 100</code>.</i>
+</p>
 
-- `show ip bgp 8.8.8.8` on `ASBR1_Core`: the path via ISP1 (`203.0.113.2`) has `LocPrf 200` and is best (`*>`); the path via ISP2 (`203.0.113.6`) keeps `LocPrf 100`.
-- `show ip bgp 203.0.113.128` on `ISP2_AS200`: the prefix arrives with the elongated path `65000 65000 65000 65000 i`.
+<br>
 
+<p align="center">
+  <img src="images/isp2-bgp-inbound-as-path-prepend.png" alt="ISP2 Inbound Prepending">
+  <br>
+  <i><b>Figure 9:</b> <code>show ip bgp 203.0.113.128</code> on ISP2_AS200: the prefix arrives with the elongated path <code>65000 65000 65000 65000 i</code> via AS-Path Prepending.</i>
+</p>
+
+</p>
 ### 6.5 Second tenant (`VRF_CORP_B`) and shared-CE analysis
 
-![PE1 VRF list](images/asbr1-bgp-outbound-local-pref.png)
-![PE1 VRF_CORP_B routing table](images/isp2-bgp-inbound-as-path-prepend.png)
+<p align="center">
+  <img src="images/pe1-show-ip-vrf.png" alt="PE1 VRF list">
+  <br>
+  <i><b>Figure 10:</b> <code>show ip vrf</code> on PE1_HN showing VRF allocations for CORP_A and CORP_B.</i>
+</p>
+
+<br>
+
+<p align="center">
+  <img src="images/pe1-vrf-corp-b-route.png" alt="PE1 VRF_CORP_B routing table">
+  <br>
+  <i><b>Figure 11:</b> <code>show ip route vrf VRF_CORP_B</code> on PE1_HN showing leaked prefixes from Customer A.</i>
+</p>
 
 **Verified**
 
@@ -251,6 +308,3 @@ ip prefix-list PL_B_OUT seq 5 permit 192.168.100.0/24
 router bgp 65001
  neighbor <PE1 VLAN10 peer> prefix-list PL_A_OUT out
  neighbor 10.10.20.2        prefix-list PL_B_OUT out
-```
-
-> `PE1_HN` also shows the physical `Et0/1` bound to `VRF_CORP_A` alongside `Et0/1.10`. For a clean trunk design, review whether the physical interface needs to be in a VRF at all.
