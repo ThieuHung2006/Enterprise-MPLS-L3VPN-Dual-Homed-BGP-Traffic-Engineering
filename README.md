@@ -1,68 +1,91 @@
 # 🌐 Enterprise MPLS L3VPN & Dual-Homed BGP Traffic Engineering
 
 ## 1. Project Overview
+Dự án mô phỏng kiến trúc mạng lõi của một Nhà cung cấp dịch vụ Internet (ISP - AS 65000), cung cấp hai giải pháp mạng trọng yếu:
+1. **MPLS L3VPN**: Thiết lập mạng riêng ảo (VRF) bảo mật, độc lập giữa các chi nhánh doanh nghiệp (Hà Nội và TP.HCM) qua hạ tầng ISP với thiết kế **BGP-Free Core**.
+2. **Dual-Homed BGP Traffic Engineering**: Quản lý định tuyến Inbound và Outbound ra Internet qua hai cổng Upstream quốc tế (ISP1 - AS 100 và ISP2 - AS 200) thông qua việc điều hướng các thuộc tính BGP (Local Preference và AS-Path Prepending).
 
-This project simulates a fully functional Internet Service Provider (ISP) core network architecture. It is designed to deliver two critical telecommunications services:
+---
 
-1.  **MPLS L3VPN (Virtual Private Network):** Providing secure, isolated, and routable private connections between enterprise branches (Hanoi and Ho Chi Minh City) over a shared ISP infrastructure. This is implemented using a **BGP-Free Core** design to minimize the routing table size on transit routers.
-2.  **BGP Traffic Engineering (TE):** Managing inbound and outbound Internet traffic via a Dual-Homed upstream connection (ISP1 and ISP2). BGP path attributes are manipulated to enforce primary and backup routing paths for optimal performance and redundancy.
+## 2. Network Topology & Addressing Table
 
-## 2. Network Topology & IP Addressing
-
-*(Insert your refined network topology image here: e.g., `![Network Topology](images/topology.png)`)*
+### Topology Diagram
+![Network Topology](images/topology.png)
 
 ### Device Roles & Protocol Mapping
-
-| Device Node | Role | Loopback 0 (Router-ID) | Physical Interfaces (WAN/Link) | Routing Protocols & Features |
+| Node | Role | Router ID / Loopback 0 | Physical Interfaces | Protocols & Features |
 | :--- | :--- | :--- | :--- | :--- |
-| **PE1_HN** | Provider Edge (Site HN) | `10.0.0.1/32` | `e0/0` (To P1), `e0/1` (To CE1) | OSPF, LDP, MP-iBGP (VPNv4), VRF, eBGP |
-| **P1_Core** | Transit Core (P-Router) | `10.0.0.2/32` | `e0/0`, `e0/1`, `e0/2` | OSPF Area 0, MPLS LDP *(BGP-Free)* |
-| **PE2_HCM** | Provider Edge (Site HCM) | `10.0.0.3/32` | `e0/0` (To P1), `e0/1` (To CE2) | OSPF, LDP, MP-iBGP (VPNv4), VRF, eBGP |
-| **ASBR1_Core** | Autonomous System BR | `10.0.0.4/32` | `e0/0` (To P1), `e0/1`, `e0/2` (To ISPs) | OSPF, LDP, eBGP (Upstream) |
-| **CE1_Hanoi** | Customer Edge (HN) | `192.168.10.1/24` | `e0/0` (To PE1) | eBGP (AS 65001) |
-| **CE2_HCM** | Customer Edge (HCM)| `192.168.20.1/24` | `e0/0` (To PE2) | eBGP (AS 65002) |
-| **ISP1_AS100**| Upstream Provider 1 | `8.8.8.8/32` | `e0/0` (To ASBR1) | eBGP (AS 100) |
-| **ISP2_AS200**| Upstream Provider 2 | `8.8.8.8/32` | `e0/0` (To ASBR1) | eBGP (AS 200) |
+| **PE1_HN** | Provider Edge (Hanoi) | `10.0.0.1/32` | `e0/0` (To P1), `e0/1` (To CE1) | OSPF Area 0, LDP, MP-iBGP (VPNv4), VRF, eBGP |
+| **P1_Core** | Transit Core (P-Router) | `10.0.0.2/32` | `e0/0`, `e0/1`, `e0/2` | OSPF Area 0, MPLS LDP (BGP-Free Core) |
+| **PE2_HCM** | Provider Edge (HCM) | `10.0.0.3/32` | `e0/0` (To P1), `e0/1` (To CE2) | OSPF Area 0, LDP, MP-iBGP (VPNv4), VRF, eBGP |
+| **ASBR1_Core** | AS Border Router | `10.0.0.4/32` | `e0/0` (To P1), `e0/1` (ISP1), `e0/2` (ISP2) | OSPF Area 0, LDP, eBGP (Upstream Multi-homing) |
+| **CE1_Hanoi** | Customer Edge (Hanoi) | `192.168.10.1/24` | `e0/0` (To PE1) | eBGP (AS 65001) |
+| **CE2_HCM** | Customer Edge (HCM) | `192.168.20.1/24` | `e0/0` (To PE2) | eBGP (AS 65002) |
+| **ISP1_AS100** | Upstream Tier-1 (Primary) | `8.8.8.8/32` | `e0/0` (To ASBR1) | eBGP (AS 100) |
+| **ISP2_AS200** | Upstream Tier-1 (Backup) | `8.8.8.8/32` | `e0/0` (To ASBR1) | eBGP (AS 200) |
 
-## 3. Core Technologies & Architecture (Deep Dive)
+---
+
+## 3. Core Architecture & Mechanisms
 
 ### 3.1. Customer Isolation via VRF
-To prevent IP overlapping and ensure data privacy, the enterprise traffic is placed into a dedicated routing instance (`VRF_CORP_A`). 
-*   **Route Distinguisher (RD):** `65000:100` (Makes the IPv4 prefix globally unique across the ISP).
-*   **Route Target (RT):** `65000:100` (Controls the import and export of VPNv4 routes between PE routers).
+* **VRF Name**: `VRF_CORP_A`
+* **Route Distinguisher (RD)**: `65000:100` biến prefix IPv4 của doanh nghiệp thành VPNv4 duy nhất trong mạng ISP.
+* **Route Target (RT)**: `65000:100` điều khiển việc Import/Export tuyến đường VPNv4 giữa các PE router.
 
-### 3.2. Two-Label Stacking (MPLS) & BGP-Free Core
-The architecture utilizes a double-label stack mechanism for data plane forwarding:
-*   **Transport Label (Outer):** Distributed by **LDP**, used by the transit core (`P1_Core`) to switch packets toward the egress PE.
-*   **VPN Service Label (Inner):** Distributed by **MP-BGP**, used by the egress PE to identify which specific VRF the packet belongs to.
-*   **Result:** The `P1_Core` router operates purely on label switching and maintains absolutely no knowledge of customer IP prefixes (BGP-Free Core), heavily optimizing hardware resources.
+### 3.2. Two-Label Stacking & BGP-Free Core
+* **Transport Label (Outer)**: Phân phối bởi giao thức LDP, được router `P1_Core` sử dụng để hoán đổi nhãn (Label Swapping) và chuyển tiếp gói tin tới egress PE kế tiếp. Áp dụng cơ chế **Penultimate Hop Popping (PHP)** tại router P.
+* **VPN Service Label (Inner)**: Phân phối bởi MP-BGP (VPNv4), được egress PE bóc tách để đẩy dữ liệu vào đúng bảng định tuyến của `VRF_CORP_A`.
+* **BGP-Free Core**: `P1_Core` hoàn toàn không tham gia tiến trình BGP và không chứa bất kỳ routing entry nào của mạng doanh nghiệp, giúp giảm tải tối đa phần cứng.
 
-### 3.3. BGP Traffic Engineering
-To enforce ISP1 as the primary link and ISP2 as the backup link for Internet traffic:
-*   **Outbound TE:** Applied a `Route-Map` on `ASBR1_Core` to set **`Local-Preference 200`** for prefixes learned from ISP1 (default is 100).
-*   **Inbound TE:** Applied **`AS-Path Prepending`** (adding AS 65000 three times) for the public prefix `203.0.113.128/25` advertised to ISP2. This artificially inflates the path length, forcing the global Internet to return traffic via ISP1.
+### 3.3. BGP Traffic Engineering Strategy
+* **Outbound Path Selection**: Áp dụng chính sách gán `Local-Preference 200` cho tuyến đường học từ ISP1 (so với mặc định 100 từ ISP2), ép toàn bộ traffic nội bộ đi ra ngoài qua ISP1.
+* **Inbound Path Selection**: Áp dụng kỹ thuật **AS-Path Prepending** (lặp thêm 3 lần ASN 65000) khi quảng bá prefix công cộng `203.0.113.128/25` sang ISP2, làm tăng độ dài AS-Path để ép Internet bên ngoài ưu tiên trả traffic về qua ISP1.
 
-## 4. Verification & Proof of Concept
+---
 
-### 4.1. Underlay Network (OSPF & MPLS LDP)
-*Verified that the core network has established OSPF adjacencies and LDP peerings successfully.*
-*(Insert Screenshot: `show ip ospf neighbor` and `show mpls ldp neighbor` from P1_Core)*
+## 4. Verification & Proof of Concept (PoC)
 
-### 4.2. BGP-Free Core & MPLS Forwarding
-*Demonstrating that the P-router has no customer routes in its RIB and forwards traffic purely based on LFIB.*
-*(Insert Screenshot: `show ip route 192.168.20.0` showing "% Network not in table" on P1_Core)*
+### 4.1. Core Underlay Infrastructure (OSPF & MPLS LDP)
+Xác nhận trạng thái hình thành láng giềng OSPF (`FULL`) và phiên LDP (`Oper`) trên hạ tầng mạng lõi `P1_Core`:
+![P1 OSPF Neighbor](images/p1-core-ospf-neighbor.png)
+![P1 LDP Neighbor](images/p1-core-mpls-ldp-neighbor.png)
 
-### 4.3. End-to-End L3VPN Connectivity
-*Verification of data plane connectivity from CE1 to CE2. The `traceroute` clearly shows the double-label stack (LDP & VPN labels) being pushed and swapped across the ISP core.*
-*(Insert Screenshot: `ping` and `traceroute` from CE1_Hanoi to CE2_HCM)*
+### 4.2. BGP-Free Core & LFIB Switching
+Kiểm chứng `P1_Core` hoàn toàn không có định tuyến khách hàng trong RIB (báo `% Network not in table`), chuyển tiếp hoàn toàn qua bảng LFIB với cơ chế gỡ nhãn PHP (`Pop Label`):
+![P1 BGP-Free RIB](images/p1-core-bgp-free-rib.png)
+![P1 LFIB Forwarding Table](images/p1-core-mpls-forwarding-table.png)
 
-### 4.4. BGP Traffic Engineering Selection
-*Verification of the BGP Best Path selection based on manipulated attributes.*
-*   **(Outbound):** Traffic to `8.8.8.8` prefers ISP1 due to `LocPrf 200`.
-*   **(Inbound):** Advertising route to ISP2 shows an elongated AS-Path (`65000 65000 65000 65000 i`).
-*(Insert Screenshot: `show ip bgp 8.8.8.8` and `show ip bgp 203.0.113.128` from ASBR1 and ISP2)*
+### 4.3. MP-BGP Control Plane & VRF Routing Table
+Kiểm tra phiên MP-iBGP VPNv4 giữa các PE và bảng định tuyến độc lập của khách hàng trên `PE1_HN`:
+![PE1 BGP VPNv4 Summary](images/pe1-bgp-vpnv4-summary.png)
+![PE1 VRF Routing Table](images/pe1-vrf-corp-a-routing-table.png)
 
-## 5. Next Steps & Enhancements
-*   Wireshark packet capture analysis to inspect the structure of MP-BGP Update messages and MPLS headers.
-*   Implement `as-override` or `allowas-in` to simulate scenarios where branches use identical Autonomous System Numbers.
-*   Implement Route Leaking to provide Internet access directly to the VRF customers.
+### 4.4. End-to-End L3VPN Data Plane (Two-Label Stacking)
+Kiểm tra kết nối CE-to-CE. Lệnh `traceroute` hiển thị rõ cơ chế ngăn xếp 2 nhãn MPLS (Transport Label 18 và VPN Service Label 16):
+![CE1 to CE2 Traceroute Label Stack](images/ce1-l3vpn-traceroute-label-stack.png)
+
+### 4.5. BGP Traffic Engineering Selection
+Kiểm chứng thuật toán chọn đường BGP Best Path cho cả 2 chiều:
+* **Outbound**: Tuyến đường đi `8.8.8.8` ưu tiên chọn ISP1 nhờ `Local-Preference 200`.
+* **Inbound**: Tại ISP2, prefix `203.0.113.128/25` nhận được mang chuỗi AS-Path bị kéo dài (`65000 65000 65000 65000`).
+![ASBR1 Outbound Local Preference Selection](images/asbr1-bgp-outbound-local-pref.png)
+![ISP2 Inbound AS-Path Prepending Verification](images/isp2-bgp-inbound-as-path-prepend.png)
+
+---
+
+## 5. Directory Structure
+```text
+.
+├── images/
+│   ├── asbr1-bgp-outbound-local-pref.png
+│   ├── ce1-l3vpn-traceroute-label-stack.png
+│   ├── isp2-bgp-inbound-as-path-prepend.png
+│   ├── p1-core-bgp-free-rib.png
+│   ├── p1-core-mpls-forwarding-table.png
+│   ├── p1-core-mpls-ldp-neighbor.png
+│   ├── p1-core-ospf-neighbor.png
+│   ├── pe1-bgp-vpnv4-summary.png
+│   ├── pe1-vrf-corp-a-routing-table.png
+│   └── topology.png
+└── README.md
