@@ -5,7 +5,6 @@ A service-provider lab built around a small ISP backbone (**AS 65000**), running
 1. **Multi-tenant MPLS L3VPN (RFC 4364)** over a **BGP-free core**.
 2. **Dual-homed eBGP edge traffic engineering** toward two upstream providers, using `LOCAL_PREF` for outbound traffic and `AS_PATH` prepending to influence inbound traffic.
 
-> **Scope:** a proof-of-concept portfolio topology with 4 provider routers, 2 customer edge routers and 2 simulated upstreams. It is not a production design. Gaps and planned work are listed in [Known Limitations & Future Work](#7-known-limitations--future-work).
 
 ---
 
@@ -169,7 +168,7 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 
 ### 6.1 Underlay: OSPF and LDP
 
-![P1 OSPF Neighbor](images/p1-core-ospf-neighbor.png)
+![P1 OSPF Neighbor](p1-core-ospf-neighbor.png)
 ![P1 LDP Neighbor](images/p1-core-mpls-ldp-neighbor.png)
 
 - `show ip ospf neighbor` on `P1_Core`: all transit adjacencies are `FULL`.
@@ -177,16 +176,16 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 
 ### 6.2 BGP-free core
 
-![P1 BGP Free Core](images/p1-core-bgp-free-verification.png)
-![P1 LFIB Table](images/p1-core-mpls-forwarding-table.png)
+![P1 BGP Free Core](p1-core-bgp-free-verification.png)
+![P1 LFIB Table](p1-core-mpls-forwarding-table.png)
 
 - `show ip route 192.168.20.0` on `P1_Core` returns `% Network not in table`: tenant prefixes are absent from the core.
 - `show mpls forwarding-table` shows `Pop Label` toward the PE loopbacks, confirming PHP.
 
 ### 6.3 End-to-end L3VPN (`VRF_CORP_A`)
 
-![PE1 VPNv4 and VRF Route](images/pe1-vpnv4-vrf-routing.png)
-![CE1 to CE2 Ping and Traceroute](images/ce1-to-ce2-ping-traceroute.png)
+![PE1 VPNv4 and VRF Route](pe1-vpnv4-vrf-routing.png)
+![CE1 to CE2 Ping and Traceroute](ce1-to-ce2-ping-traceroute.png)
 
 - The MP-iBGP VPNv4 session between `10.0.0.1` and `10.0.0.3` is `Established`.
 - In `VRF_CORP_A`, `192.168.20.0/24` is installed via BGP with recursive next hop `10.0.0.3`.
@@ -202,8 +201,8 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 
 ### 6.5 Second tenant (`VRF_CORP_B`) and shared-CE analysis
 
-![PE1 VRF list](images/pe1-show-ip-vrf.png)
-![PE1 VRF_CORP_B routing table](images/pe1-vrf-corp-b-route.png)
+![PE1 VRF list](pe1-show-ip-vrf.png)
+![PE1 VRF_CORP_B routing table](pe1-vrf-corp-b-route.png)
 
 **Verified**
 
@@ -247,31 +246,3 @@ router bgp 65001
 ```
 
 > `PE1_HN` also shows the physical `Et0/1` bound to `VRF_CORP_A` alongside `Et0/1.10`. For a clean trunk design, review whether the physical interface needs to be in a VRF at all.
-
----
-
-## 7. Known Limitations & Future Work
-
-**Redundancy**
-- Single P router and a single PE per site: no core redundancy and no link-failure test.
-- ISP1-to-ISP2 failover is configured but not yet tested with a shutdown and recovery run that measures packet loss and timing.
-
-**Security and filtering**
-- No ASBR prefix filters (bogons, RFC 1918, own-prefix-only outbound), no `maximum-prefix`.
-- No explicit policy preventing AS 65000 from becoming transit between ISP1 and ISP2.
-- No BGP or LDP authentication.
-
-**Convergence and operations**
-- No BFD or timer tuning, so no sub-second convergence is claimed. Measured convergence times are still to be added.
-- No monitoring (syslog, SNMP, NetFlow) and no automated configuration management.
-
-**Features not covered**
-- Route reflectors, MPLS TE, QoS, IPv6/6PE, Inter-AS VPN, hub-and-spoke or extranet RT designs.
-
-**Next steps**
-1. Complete the validation checklist in section 6.5.
-2. Apply per-neighbor prefix-lists (or separate CEs) and run a true overlapping-IP test.
-3. Run an ISP1 failure and recovery test and record loss and convergence time.
-4. Add ASBR filtering and authentication.
-5. Add a second P router for core redundancy.
-6. Publish device configs in a `configs/` folder so the lab can be reproduced.
