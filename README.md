@@ -202,8 +202,8 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 
 ### 6.5 Second tenant (`VRF_CORP_B`) and shared-CE analysis
 
-![PE1 VRF list](images/pe1-show-ip-vrf.png)
-![PE1 VRF_CORP_B routing table](images/pe1-vrf-corp-b-route.png)
+![PE1 VRF list](images/images/pe1-vrf-corp-a-routing-table.png)
+![PE1 VRF_CORP_B routing table](images/images/pe1-vrf-corp-b-routing-table.png)
 
 **Verified**
 
