@@ -1,9 +1,34 @@
 # 🌐 Enterprise MPLS L3VPN & Dual-Homed BGP Traffic Engineering
 
 ## 1. Project Overview
-Dự án mô phỏng kiến trúc mạng lõi của một Nhà cung cấp dịch vụ Internet (ISP - AS 65000), cung cấp hai giải pháp mạng trọng yếu:
-1. **MPLS L3VPN**: Thiết lập mạng riêng ảo (VRF) bảo mật, độc lập giữa các chi nhánh doanh nghiệp (Hà Nội và TP.HCM) qua hạ tầng ISP với thiết kế **BGP-Free Core**.
-2. **Dual-Homed BGP Traffic Engineering**: Quản lý định tuyến Inbound và Outbound ra Internet qua hai cổng Upstream quốc tế (ISP1 - AS 100 và ISP2 - AS 200) thông qua việc điều hướng các thuộc tính BGP (Local Preference và AS-Path Prepending).
+
+### Executive Summary
+This enterprise-grade infrastructure project emulates an autonomous **Tier-2 Internet Service Provider (ISP) backbone (AS 65000)**, demonstrating production-ready implementations of **Multi-Protocol Label Switching Layer 3 Virtual Private Networks (MPLS L3VPN)** and **Dual-Homed Multi-AS BGP Traffic Engineering**. 
+
+Designed strictly in compliance with service provider architectural standards (**RFC 4364 / RFC 2547**), the design addresses two primary enterprise networking challenges:
+* Providing secure, multi-tenant enterprise WAN transport over a shared core while completely decoupling tenant routes from core transit routers (**BGP-Free Core**).
+* Engineering end-to-end multi-homed Internet routing redundancy and deterministic path selection using advanced BGP attribute tuning.
+
+---
+
+### Key Architectural Pillars
+
+#### 1. Multi-Tenant Enterprise MPLS L3VPN (Core WAN Transport)
+* **Customer Isolation via VRF & Multiprotocol BGP**: Implements Virtual Routing and Forwarding (`VRF_CORP_A`) on edge nodes, isolating enterprise routing instances locally. Inter-site prefix uniqueness and distribution across the ISP core are managed using unique **Route Distinguishers (RD)** and granular **Route Target (RT)** extended communities transported via **MP-iBGP (VPNv4 Address Family)**.
+* **Two-Label MPLS Switching & PHP**: Leverages a dual-label stack architecture comprising an outer **Transport Label** (distributed via LDP for core transit) and an inner **VPN Service Label** (distributed via MP-BGP for VRF demultiplexing). Core switching incorporates **Penultimate Hop Popping (PHP)** on the P router to optimize packet forwarding efficiency and eliminate double-label lookups at egress nodes.
+* **BGP-Free Core Scalability**: Offloads all customer routing complexity to Provider Edge (PE) routers, ensuring the transit core (`P1_Core`) remains 100% agnostic to tenant routes (zero customer prefixes in core RIB/FIB), drastically minimizing control plane overhead and hardware resource utilization.
+
+#### 2. Dual-Homed BGP Traffic Engineering (Upstream Edge Transit)
+* **Deterministic Outbound Optimization (Local Preference)**: Establishes an Active/Standby egress model by overriding default BGP path selection using a higher `Local-Preference` (200) for upstream routes received from **ISP1 (AS 100)** over **ISP2 (AS 200)**, deterministic routing all internal outbound Internet traffic via the primary transit link.
+* **Inbound Traffic Manipulation (AS-Path Prepending)**: Solves the asymmetrical routing dilemma inherent in multi-homed BGP designs by applying `AS-Path Prepending` (triple ASN injection) on advertised public enterprise subnets (`203.0.113.128/25`) towards ISP2. This artificially degrades the metric seen by remote autonomous systems, ensuring optimal and deterministic inbound convergence through ISP1.
+
+---
+
+### Core Technical Highlights
+* **Underlay Routing**: OSPFv2 Single-Area Backbone (Area 0) providing sub-second loopback reachability for LDP and MP-BGP transport peering.
+* **Label Distribution**: Native LDP (RFC 5036) for seamless Label Switched Path (LSP) establishment across the transit core.
+* **Overlay Multiprotocol Signaling**: MP-iBGP peering between PE routers for VPNv4 exchange; eBGP peering for tenant CE-to-PE and external Upstream multi-homing.
+* **High Availability & Fault Tolerance**: End-to-end failover architecture capable of instant path redirection upon primary link degradation without route blackholing.
 
 ---
 
