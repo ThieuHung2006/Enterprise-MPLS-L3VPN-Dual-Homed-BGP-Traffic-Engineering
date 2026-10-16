@@ -1,0 +1,66 @@
+hostname PE1_HN
+!
+ip vrf VRF_CORP_A
+ rd 65000:100
+ route-target export 65000:100
+ route-target import 65000:100
+!
+ip vrf VRF_CORP_B
+ rd 65000:200
+ route-target export 65000:200
+ route-target import 65000:200
+!
+mpls ldp router-id Loopback0 force
+!
+interface Loopback0
+ ip address 10.0.0.1 255.255.255.255
+ ip ospf 1 area 0
+!
+interface Ethernet0/0
+ description TO_P1_CORE
+ ip address 172.16.12.1 255.255.255.0
+ ip ospf 1 area 0
+ mpls ip
+ no shutdown
+!
+interface Ethernet0/1
+ description TO_CE1_HANOI_TRUNK
+ no ip address
+ no shutdown
+!
+interface Ethernet0/1.10
+ encapsulation dot1Q 10
+ ip vrf forwarding VRF_CORP_A
+ ip address 10.10.1.1 255.255.255.252
+ no shutdown
+!
+interface Ethernet0/1.20
+ encapsulation dot1Q 20
+ ip vrf forwarding VRF_CORP_B
+ ip address 10.10.20.1 255.255.255.252
+ no shutdown
+!
+router ospf 1
+ router-id 10.0.0.1
+!
+router bgp 65000
+ bgp log-neighbor-changes
+ neighbor 10.0.0.3 remote-as 65000
+ neighbor 10.0.0.3 update-source Loopback0
+ !
+ address-family vpnv4
+  neighbor 10.0.0.3 activate
+  neighbor 10.0.0.3 send-community extended
+ exit-address-family
+ !
+ address-family ipv4 vrf VRF_CORP_A
+  neighbor 10.10.1.2 remote-as 65001
+  neighbor 10.10.1.2 activate
+ exit-address-family
+ !
+ address-family ipv4 vrf VRF_CORP_B
+  neighbor 10.10.20.2 remote-as 65001
+  neighbor 10.10.20.2 activate
+ exit-address-family
+!
+end

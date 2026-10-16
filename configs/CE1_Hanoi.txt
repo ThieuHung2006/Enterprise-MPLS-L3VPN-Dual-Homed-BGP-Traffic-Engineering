@@ -1,0 +1,40 @@
+hostname CE1_Hanoi
+!
+interface Loopback10
+ description LAN_CORP_A
+ ip address 192.168.10.1 255.255.255.0
+ no shutdown
+!
+interface Loopback100
+ description LAN_CORP_B
+ ip address 192.168.100.1 255.255.255.0
+ no shutdown
+!
+interface Ethernet0/0
+ description TO_PE1_HN_TRUNK
+ no ip address
+ no shutdown
+!
+interface Ethernet0/0.10
+ encapsulation dot1Q 10
+ ip address 10.10.1.2 255.255.255.252
+ no shutdown
+!
+interface Ethernet0/0.20
+ encapsulation dot1Q 20
+ ip address 10.10.20.2 255.255.255.252
+ no shutdown
+!
+router bgp 65001
+ bgp log-neighbor-changes
+ neighbor 10.10.1.1 remote-as 65000
+ neighbor 10.10.20.1 remote-as 65000
+ !
+ address-family ipv4
+  network 192.168.10.0 mask 255.255.255.0
+  network 192.168.100.0 mask 255.255.255.0
+  neighbor 10.10.1.1 activate
+  neighbor 10.10.20.1 activate
+ exit-address-family
+!
+end
