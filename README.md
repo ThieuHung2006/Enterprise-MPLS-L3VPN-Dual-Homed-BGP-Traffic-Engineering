@@ -184,8 +184,9 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 
 ### 6.3 End-to-end L3VPN (`VRF_CORP_A`)
 
-![PE1 VPNv4 and VRF Route](pe1-vpnv4-vrf-routing.png)
-![CE1 to CE2 Ping and Traceroute](ce1-to-ce2-ping-traceroute.png)
+![PE1 BGP VPNv4 Summary](images/pe1-bgp-vpnv4-summary.png)
+![PE1 VRF Routing Table](images/pe1-vrf-corp-a-routing-table.png)
+![CE1 to CE2 Ping and Traceroute](images/ce1-l3vpn-traceroute-label-stack.png)
 
 - The MP-iBGP VPNv4 session between `10.0.0.1` and `10.0.0.3` is `Established`.
 - In `VRF_CORP_A`, `192.168.20.0/24` is installed via BGP with recursive next hop `10.0.0.3`.
@@ -193,16 +194,16 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 
 ### 6.4 Upstream traffic engineering
 
-![ASBR1 Outbound LocalPref](images/asbr1-bgp-local-preference.png)
-![ISP2 Inbound Prepending](images/isp2-bgp-as-path-prepending.png)
+![ASBR1 Outbound LocalPref](images/asbr1-bgp-outbound-local-pref.png)
+![ISP2 Inbound Prepending](images/isp2-bgp-inbound-as-path-prepend.png)
 
 - `show ip bgp 8.8.8.8` on `ASBR1_Core`: the path via ISP1 (`203.0.113.2`) has `LocPrf 200` and is best (`*>`); the path via ISP2 (`203.0.113.6`) keeps `LocPrf 100`.
 - `show ip bgp 203.0.113.128` on `ISP2_AS200`: the prefix arrives with the elongated path `65000 65000 65000 65000 i`.
 
 ### 6.5 Second tenant (`VRF_CORP_B`) and shared-CE analysis
 
-![PE1 VRF list](pe1-show-ip-vrf.png)
-![PE1 VRF_CORP_B routing table](pe1-vrf-corp-b-route.png)
+![PE1 VRF list](images/pe1-show-ip-vrf.png)
+![PE1 VRF_CORP_B routing table](images/pe1-vrf-corp-b-route.png)
 
 **Verified**
 
