@@ -320,36 +320,6 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
   <i><b>Figure 16:</b> <code>show ip bgp 203.0.113.128</code> on ISP2_AS200. The prefix arrives with the elongated path <code>65000 65000 65000 65000 i</code>.</i>
 </p>
 
-[### 6.7 Packet-level analysis (Wireshark)
-
-> Captured from EVE-NG link captures. Each figure states the link, direction and display filter used.
-
-<p align="center">
-  <img src="images/wireshark-pe1-p1-mpls-two-labels.png" alt="Capture on PE1-P1 link">
-  <br>
-  <i><b>Figure 17:</b> Link PE1_HN to P1_Core, filter <code>mpls</code>. Two labels: outer LDP label (S=0) and inner VPN label (S=1).</i>
-</p>
-
-<p align="center">
-  <img src="images/wireshark-p1-pe2-mpls-one-label.png" alt="Capture on P1-PE2 link">
-  <br>
-  <i><b>Figure 18:</b> Link P1_Core to PE2_HCM, filter <code>mpls</code>. Only the VPN label remains: the outer label was popped at P1 (PHP).</i>
-</p>
-
-<p align="center">
-  <img src="images/wireshark-bgp-vpnv4-update-rt.png" alt="MP-BGP VPNv4 update">
-  <br>
-  <i><b>Figure 19:</b> BGP UPDATE between the PEs, filter <code>bgp.type == 2</code>. <code>MP_REACH_NLRI</code> (AFI 1, SAFI 128) carries the RD, VPN label and the Route Target extended community.</i>
-</p>
-
-<p align="center">
-  <img src="images/wireshark-ce1-pe1-vlan20-bgp-update.png" alt="CE1 to PE1 VLAN 20 BGP update">
-  <br>
-  <i><b>Figure 20:</b> Link CE1_Hanoi to PE1_HN, filter <code>vlan.id == 20 &amp;&amp; bgp.type == 2</code>. After VRF-Lite, only Tenant B's LAN is advertised on VLAN 20.</i>
-</p>
-
----
-](https://github.com/ThieuHung2006/Enterprise-MPLS-L3VPN-Dual-Homed-BGP-Traffic-Engineering/edit/main/README.md)
 ## 7. Known Limitations & Future Work
 
 **Redundancy**
