@@ -282,6 +282,7 @@ CE1_Hanoi# ping vrf CORP_A 192.168.200.1
   <img src="images/cross-tenant-ping-test.png" alt="Cross-tenant ping test">
   <br>
   <i><b>Figure 12:</b> Ping within Tenant B succeeds, while ping from Tenant A toward a Tenant B-only prefix fails.</i>
+ <img src="images/cross-tenant-ping-test_false.png" alt="Cross-tenant ping test false">
 </p>
 
 **Result:** after VRF-Lite, no prefixes of one tenant were observed in the other tenant's VRF, and the cross-tenant ping failed. This tests one direction; the reverse direction (`ping vrf CORP_B 192.168.20.1`) can be added for completeness.
