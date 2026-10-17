@@ -233,7 +233,7 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 </p>
 
 <p align="center">
-  <img src="images/ce1-traceroute-corp-a.png" alt="CE1 to CE2 traceroute Tenant A">
+  <img src="images/images/traceroute vrf CORP_A.png" alt="CE1 to CE2 traceroute Tenant A">
   <br>
   <i><b>Figure 7:</b> Traceroute from CE1_Hanoi to CE2_HCM inside <code>VRF_CORP_A</code>. Hop 2 (P1_Core) shows the two-label stack <code>[Labels 20/16]</code>; hop 3 shows the single VPN   label <code>[Label 16]</code>, confirming PHP at P1.</i>
 </p>
@@ -279,7 +279,7 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 </p>
 
 <p align="center">
-  <img src="images/ce1-traceroute-corp-b.png" alt="CE1 to CE2 traceroute Tenant B">
+  <img src="images/images/traceroute vrf CORP_B.png" alt="CE1 to CE2 traceroute Tenant B">
   <br>
   <i><b>Figure 12b:</b> Traceroute from CE1_Hanoi to CE2_HCM inside <code>VRF_CORP_B</code>. Transit hop across P1_Core uses the same outer transport label <code>20</code>, but distinct inner VPN label <code>26</code> (compared to label <code>16</code> in Tenant A), proving deterministic data-plane separation across the shared core.</i>
 </p>
