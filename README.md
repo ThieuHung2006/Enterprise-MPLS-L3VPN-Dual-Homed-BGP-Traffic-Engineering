@@ -233,9 +233,9 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 </p>
 
 <p align="center">
-  <img src="images/ce1-l3vpn-traceroute-label-stack.png" alt="CE1 to CE2 traceroute with label stack">
+  <img src="images/ce1-traceroute-corp-a.png" alt="CE1 to CE2 traceroute Tenant A">
   <br>
-  <i><b>Figure 7:</b> Traceroute from CE1_Hanoi to CE2_HCM. Hop 2 (P1_Core) shows the two-label stack <code>[Labels 20/16]</code>; hop 3 shows the single VPN label <code>[Label 16]</code>, consistent with PHP at P1.</i>
+  <i><b>Figure 7:</b> Traceroute from CE1_Hanoi to CE2_HCM inside <code>VRF_CORP_A</code>. Hop 2 (P1_Core) shows the two-label stack <code>[Labels 20/16]</code>; hop 3 shows the single VPN   label <code>[Label 16]</code>, confirming PHP at P1.</i>
 </p>
 
 ### 6.4 Tenant isolation with VRF-Lite
@@ -268,21 +268,20 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
   <i><b>Figure 11:</b> <code>show ip vrf detail</code> on PE1_HN showing separate RD and import/export RT for each tenant.</i>
 </p>
 
-**Data-plane test.** A positive control inside Tenant B, then a cross-tenant attempt:
-
-```text
-CE1_Hanoi# ping vrf CORP_B 192.168.200.1
-[paste real output here: expected to succeed]
-
-CE1_Hanoi# ping vrf CORP_A 192.168.200.1
-[paste real output here: expected to fail]
-```
+**Data-plane test (Cross-tenant ping and traceroute)**
 
 <p align="center">
-  <img src="images/cross-tenant-ping-test.png" alt="Cross-tenant ping test">
+  <img src="images/cross-tenant-ping-test.png" alt="Cross-tenant ping test success">
   <br>
-  <i><b>Figure 12:</b> Ping within Tenant B succeeds, while ping from Tenant A toward a Tenant B-only prefix fails.</i>
- <img src="images/cross-tenant-ping-test_false.png" alt="Cross-tenant ping test false">
+  <img src="images/cross-tenant-ping-test_false.png" alt="Cross-tenant ping test failure">
+  <br>
+  <i><b>Figure 12:</b> Ping within Tenant B succeeds (<code>!!!!!</code>), while ping from Tenant A toward a Tenant B-only prefix fails (<code>% Network not in table</code>).</i>
+</p>
+
+<p align="center">
+  <img src="images/ce1-traceroute-corp-b.png" alt="CE1 to CE2 traceroute Tenant B">
+  <br>
+  <i><b>Figure 12b:</b> Traceroute from CE1_Hanoi to CE2_HCM inside <code>VRF_CORP_B</code>. Transit hop across P1_Core uses the same outer transport label <code>20</code>, but distinct inner VPN label <code>26</code> (compared to label <code>16</code> in Tenant A), proving deterministic data-plane separation across the shared core.</i>
 </p>
 
 **Result:** after VRF-Lite, no prefixes of one tenant were observed in the other tenant's VRF, and the cross-tenant ping failed. This tests one direction; the reverse direction (`ping vrf CORP_B 192.168.20.1`) can be added for completeness.
