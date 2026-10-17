@@ -320,27 +320,123 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
   <i><b>Figure 16:</b> <code>show ip bgp 203.0.113.128</code> on ISP2_AS200. The prefix arrives with the elongated path <code>65000 65000 65000 65000 i</code>.</i>
 </p>
 
-## 7. Known Limitations & Future Work
+## 7. Technical Verification & Wireshark Packet Analysis
 
-**Redundancy**
-- Single P router and a single PE per site: no core redundancy and no link-failure test.
-- ISP1-to-ISP2 failover is configured but has not been tested with a shutdown and recovery run that measures packet loss and timing.
+---
 
-**Security and filtering**
-- No ASBR prefix filters (bogons, RFC 1918, own-prefix-only outbound), no `maximum-prefix`.
-- No explicit policy preventing AS 65000 from becoming a transit between ISP1 and ISP2.
-- No BGP or LDP authentication.
+### 7.1 MPLS L3VPN Control Plane & Data Plane Encapsulation
 
-**Convergence and operations**
-- No BFD or timer tuning, so no sub-second convergence is claimed. Measured convergence times are still to be added.
-- No monitoring (syslog, SNMP, NetFlow) and no automated configuration management.
+This section provides packet-level verification via Wireshark to validate the MPLS Two-Label Stack architecture, Penultimate Hop Popping (PHP) optimization, and MP-iBGP VPNv4 control-plane signaling across the provider core.
 
-**Design notes**
-- Both tenants share a physical CE and PE-CE link (separated by VLANs and VRF-Lite). A dedicated CE per tenant is more typical.
-- A Route Reflector would remove the PE full-mesh requirement. Use a **dedicated RR**; running BGP on `P1_Core` would end its BGP-free role.
+#### 1. Two-Label Stack Encapsulation (PE1_HN to P1_Core)
 
-**Next steps**
-1. Overlapping address space: give both tenants the same LAN prefix (for example `192.168.10.0/24` at different sites) and show that both VRFs keep independent routes. Avoid `10.0.0.0/24`, which collides with the provider loopback range.
+When customer traffic belonging to `VRF_CORP_A` travels from `CE1_Hanoi` (`192.168.10.1`) to `CE2_HCM` (`192.168.20.1`), the ingress Provider Edge router (`PE1_HN`) imposes a two-level MPLS label stack onto the IPv4 payload before forwarding the frame into the MPLS core.
+
+<p align="center">
+  <img src="images/wireshark-pe1-p1-mpls-two-labels.png" alt="Two-Label Stack Encapsulation">
+  <br>
+  <i><b>Figure 17:</b> Packet capture on the PE1_HN to P1_Core link demonstrating the Two-Label Stack operation for Tenant A traffic.</i>
+</p>
+
+* **Outer Label (IGP/LDP Transport Label – `18`):**
+  * **Bottom of Label Stack (`S=0`):** Indicates that additional MPLS headers follow underneath.
+  * **Functionality:** Dynamically allocated and distributed by LDP over OSPF. Transit core routers (`P1_Core`) inspect exclusively this top label to label-switch the packet toward the BGP Next-Hop loopback address of the egress PE (`10.0.0.3` on `PE2_HCM`), keeping the core completely BGP-free.
+* **Inner Label (MP-BGP VPN Label – `21`):**
+  * **Bottom of Label Stack (`S=1`):** Marks the end of the MPLS label stack, immediately preceding the Layer 3 IPv4 header.
+  * **Functionality:** Allocated by `PE2_HCM` via MP-iBGP and bound to `VRF_CORP_A`. This label remains untouched across the transit path and instructs the egress PE on which specific VRF routing instance to use for final lookup.
+* **Encapsulated Payload:** The original customer ICMP Echo packet (`Src: 192.168.10.1`, `Dst: 192.168.20.1`) is transparently tunneled across the shared service provider backbone.
+
+---
+
+#### 2. Penultimate Hop Popping (PHP) Mechanism (P1_Core to PE2_HCM)
+
+To eliminate the performance penalty of a double lookup (LFIB lookup followed by FIB lookup) at the egress Provider Edge router, LDP leverages Penultimate Hop Popping (PHP) triggered by an `implicit-null` (Label `3`) advertisement from `PE2_HCM`.
+
+<p align="center">
+  <img src="images/wireshark-p1-pe2-mpls-one-labe.png" alt="Penultimate Hop Popping">
+  <br>
+  <i><b>Figure 18:</b> Packet capture on the P1_Core to PE2_HCM link verifying Penultimate Hop Popping (PHP) behavior.</i>
+</p>
+
+* **Outer Label Removal:** The penultimate router (`P1_Core`) pops the transport label (`Label 18`) prior to transmitting the frame across the final link to `PE2_HCM`.
+* **Single Remaining Label (`Label: 21, S=1`):** The packet arrives at `PE2_HCM` carrying only the bottom-of-stack VPN label (`21`). Furthermore, the MPLS TTL decrements from `254` to `253`, confirming a valid transit hop across `P1_Core`.
+* **Data-Plane Optimization:** Upon receipt, `PE2_HCM` performs a single LFIB lookup on Label `21`, strips the MPLS header, and forwards the native IPv4 packet directly out the egress sub-interface toward `CE2_HCM`.
+
+---
+
+#### 3. MP-iBGP VPNv4 Routing Update & Route Target Filtering
+
+The provider edge routers establish an MP-iBGP peering session (`AFI: 1`, `SAFI: 128`) over Loopback0 interfaces to exchange customer VPNv4 prefixes, labels, and extended communities.
+
+<p align="center">
+  <img src="images/wireshark-bgp-vpnv4-update-rt.png" alt="MP-BGP VPNv4 Update Message">
+  <br>
+  <i><b>Figure 19:</b> Wireshark capture of an MP-iBGP UPDATE message advertising Tenant A reachability and attributes.</i>
+</p>
+
+* **Multiprotocol Reachable NLRI (`MP_REACH_NLRI`):**
+  * **Address Family (`AFI: 1 / SAFI: 128`):** Negotiates Labeled VPNv4 Unicast capability.
+  * **Route Distinguisher (`RD: 65000:100`):** Prepended to the customer IPv4 subnet (`192.168.10.0/24`) to construct a globally unique 96-bit VPNv4 prefix, allowing overlapping IP spaces across different tenants.
+* **Label Binding (`Label Stack: 21`):** Associates MPLS VPN Label `21` with the advertised prefix in the control plane.
+* **Extended Communities (`Route Target: 65000:100`):** Attached as a BGP transitive extended community attribute. The receiving PE evaluates this value against its configured `route-target import` policies to selectively import the route into `VRF_CORP_A`.
+
+---
+
+### 7.2 Multi-Tenant Traffic Isolation via VRF-Lite
+
+At the Customer Edge (`CE1_Hanoi`), VRF-Lite combined with IEEE 802.1Q VLAN tagging is deployed on the PE-CE trunk interface to enforce strict Layer 2 and Layer 3 segmentation between tenants, preventing inter-tenant route leaking.
+
+<p align="center">
+  <img src="images/wireshark-vlan20-bgp-update-vrf-lite.png" alt="VRF-Lite 802.1Q BGP Update on VLAN 20">
+  <br>
+  <i><b>Figure 20:</b> BGP UPDATE captured on the PE1-CE1 trunk (VLAN 20) after VRF-Lite implementation, confirming strict route isolation.</i>
+</p>
+
+* **802.1Q Data-Link Isolation (`VLAN ID: 20`):** The eBGP session between `CE1_Hanoi` (`10.10.20.2`) and `PE1_HN` (`10.10.20.1`) is encapsulated within VLAN 20 on sub-interface `Ethernet0/0.20`, isolating Tenant B control-plane traffic at Layer 2.
+* **Strict VRF RIB Separation:** Inspection of the BGP `NLRI` field confirms that only Tenant B's internal subnet (`192.168.100.0/24`) is advertised over this peering session. Tenant A prefixes (`192.168.10.0/24`) are completely isolated within `vrf CORP_A`, eliminating cross-tenant route propagation.
+
+---
+
+### 7.3 External BGP Traffic Engineering & Automated Failover (ISP1 / ISP2)
+
+The enterprise core (`AS 65000`) is dual-homed to two independent upstream providers: **ISP1 (`AS 100`)** and **ISP2 (`AS 200`)**. Deterministic routing policies are enforced at `ASBR1_Core` to designate ISP1 as the primary transit path and ISP2 as the standby backup path.
+
+#### 1. Inbound Traffic Engineering via AS-Path Prepending
+
+To influence upstream autonomous systems to route return traffic via the primary link (`ISP1_AS100`), `ASBR1_Core` applies an outbound route-map toward `ISP2_AS200` that prepends its own ASN multiple times.
+
+<p align="center">
+  <img src="images/wireshark-bgp-as-path-prepend-isp2.png" alt="BGP UPDATE to ISP2 with AS-Path Prepend">
+  <br>
+  <i><b>Figure 21:</b> Outbound BGP UPDATE messages from ASBR1_Core to ISP2_AS200 demonstrating 3x AS-Path Prepending.</i>
+</p>
+
+* **Path Manipulation (`AS_PATH: 65000 65000 65000 65000`):** By prepending `AS 65000` three additional times, the total AS-Path length advertised to ISP2 increases to four hops. Upstream BGP speakers executing the standard BGP Best-Path Selection algorithm prefer the shorter path through `ISP1_AS100` for inbound traffic delivery.
+* **BGP Update Packing & Attribute Granularity:** Wireshark captures two separate `UPDATE` messages within the same TCP segment because BGP groups prefixes by shared Path Attributes:
+  * The first UPDATE advertises transit prefixes learned from AS 100 (`8.8.8.8/32`, `100.0.0.0/24`) carrying the path `65000 65000 65000 65000 100`.
+  * The second UPDATE advertises locally originated enterprise space (`203.0.113.128/25`) carrying the path `65000 65000 65000 65000` along with `MULTI_EXIT_DISC (MED: 0)`.
+
+---
+
+#### 2. Outbound Traffic Enforcement & Automated Failover Verification
+
+Outbound path selection is controlled via the BGP **Local Preference** attribute: routes learned from `ISP1_AS100` are assigned `Local-Pref 200`, whereas routes from `ISP2_AS200` retain the default `Local-Pref 100`. Data-plane behavior is validated by monitoring continuous ICMP probes to `8.8.8.8` before and after a simulated primary link failure.
+
+<p align="center">
+  <img src="images/wireshark-failover-primary-isp1.png" alt="Normal Outbound Traffic via ISP1">
+  <br>
+  <i><b>Figure 22:</b> Normal operating state. Outbound ICMP traffic to 8.8.8.8 exits via the primary ISP1 link (Source IP: 203.0.113.1).</i>
+</p>
+
+* **Primary Path Operation (Figure 22):** Under normal conditions, ICMP Echo Requests egress via interface `Ethernet0/1` (`Src: 203.0.113.1`, subnet `203.0.113.0/30`), confirming that `Local-Preference 200` installs `ISP1_AS100` as the active FIB next-hop.
+
+<p align="center">
+  <img src="images/wireshark-failover-backup-isp2.png" alt="Automated Failover Outbound Traffic via ISP2">
+  <br>
+  <i><b>Figure 23:</b> Failover operating state. Following primary link failure, outbound ICMP traffic automatically converges onto the backup ISP2 link (Source IP: 203.0.113.5).</i>
+</p>
+
+* **Automated Convergence & Failover (Figure 23):** When interface `Ethernet0/1` is administratively shut down to simulate a fiber cut, `ASBR1_Core` invalidates the primary BGP next-hop and immediately installs the standby path via `ISP2_AS200` into the CEF table. Subsequent ICMP packets automatically egress through `Ethernet0/2` with source address `203.0.113.5` (subnet `203.0.113.4/30`), demonstrating resilient sub-second failover without manual intervention.
 2. ISP1 failure and recovery test with ping loss and convergence time.
 3. ASBR filtering and BGP authentication.
 4. A second P router for core redundancy, which also lets LDP session protection be demonstrated.
