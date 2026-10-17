@@ -1,5 +1,4 @@
-hostname PE2_HCM
-!
+! --- 1. ĐỊNH NGHĨA VRF VÀ RD/RT CHO TỪNG TENANT ---
 ip vrf VRF_CORP_A
  rd 65000:100
  route-target export 65000:100
@@ -9,42 +8,26 @@ ip vrf VRF_CORP_B
  rd 65000:200
  route-target export 65000:200
  route-target import 65000:200
-!
-mpls ldp router-id Loopback0 force
-!
-interface Loopback0
- ip address 10.0.0.3 255.255.255.255
- ip ospf 1 area 0
-!
-interface Ethernet0/0
- description TO_P1_CORE
- ip address 172.16.23.3 255.255.255.0
- ip ospf 1 area 0
- mpls ip
- no shutdown
-!
-interface Ethernet0/1
- description TO_CE2_HCM_TRUNK
- no ip address
- no shutdown
-!
+
+! --- 2. GÁN VRF VÀO SUB-INTERFACE KẾT NỐI VỚI CE2 ---
 interface Ethernet0/1.10
  encapsulation dot1Q 10
  ip vrf forwarding VRF_CORP_A
  ip address 10.10.2.1 255.255.255.252
- no shutdown
 !
 interface Ethernet0/1.20
  encapsulation dot1Q 20
  ip vrf forwarding VRF_CORP_B
  ip address 10.10.30.1 255.255.255.252
- no shutdown
-!
-router ospf 1
- router-id 10.0.0.3
-!
+
+! --- 3. CỔNG CORE KẾT NỐI P1_CORE ---
+interface Ethernet0/0
+ ip address 172.16.23.2 255.255.255.252
+ mpls ip
+
+! --- 4. BGP VPNv4 VÀ eBGP PE-CE ---
 router bgp 65000
- bgp log-neighbor-changes
+ bgp router-id 10.0.0.3
  neighbor 10.0.0.1 remote-as 65000
  neighbor 10.0.0.1 update-source Loopback0
  !
@@ -62,5 +45,14 @@ router bgp 65000
   neighbor 10.10.30.2 remote-as 65002
   neighbor 10.10.30.2 activate
  exit-address-family
-!
-end
+
+! --- 5. OSPF CORE ---
+router ospf 1
+ router-id 10.0.0.3
+ network 10.0.0.3 0.0.0.0 area 0
+ network 172.16.23.0 0.0.0.3 area 0
+ mpls ldp sync
+ mpls ldp autoconfig area 0
+
+! --- 6. LDP SESSION PROTECTION ---
+mpls ldp session protection
