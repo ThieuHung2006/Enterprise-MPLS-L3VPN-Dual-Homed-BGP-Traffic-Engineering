@@ -320,7 +320,7 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
   <i><b>Figure 16:</b> <code>show ip bgp 203.0.113.128</code> on ISP2_AS200. The prefix arrives with the elongated path <code>65000 65000 65000 65000 i</code>.</i>
 </p>
 
-### 6.7 Packet-level analysis (Wireshark)
+[### 6.7 Packet-level analysis (Wireshark)
 
 > Captured from EVE-NG link captures. Each figure states the link, direction and display filter used.
 
@@ -349,7 +349,7 @@ Unless a remote AS overrides this with its own policy, it prefers the shorter pa
 </p>
 
 ---
-
+](https://github.com/ThieuHung2006/Enterprise-MPLS-L3VPN-Dual-Homed-BGP-Traffic-Engineering/edit/main/README.md)
 ## 7. Known Limitations & Future Work
 
 **Redundancy**
