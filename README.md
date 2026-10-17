@@ -300,6 +300,7 @@ CE1_Hanoi# ping vrf CORP_A 192.168.200.1
 
 <p align="center">
   <img src="images/p1-core-ldp-session-protection.png" alt="LDP session protection">
+  <img src="images/p1-core-ldp-session-protection_discover.png" alt="LDP session protection discover">
   <br>
   <i><b>Figure 14:</b> <code>show mpls ldp neighbor</code> / <code>show mpls ldp discovery</code> output showing session protection configured.</i>
 </p>
