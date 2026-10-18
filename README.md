@@ -538,37 +538,54 @@ The first verification scenario validates physical interface state tracking on C
 Standard monitoring typically reports that a BGP session transitioned to `Idle`, leaving engineers to manually SSH into routers to troubleshoot. This lab implements an **Event-Driven Auto-Forensic Pipeline** to automate immediate root-cause diagnosis.
 
 #### Architecture and Workflow
-
-1. **Trigger Condition:** SNMP evaluates `cbgpPeer2State` for neighbor `10.0.0.3`. When the value drops below `Established (6)`, a `High` severity problem is raised.
+1. **Trigger Condition:** SNMP evaluates `cbgpPeer2State` for neighbor `10.0.0.3`. When the value drops below `Established (6)`, a `High` severity problem is raised[cite: 19, 20].
 2. **Dual-Action Execution:** Zabbix Action triggers two simultaneous operations:
-   - Dispatches a standard NOC Problem alert via Telegram.
-   - Executes an internal Python automation script (`bgp_forensic.py`) directly inside the Zabbix container via `Remote Command`.
+   - Dispatches a standard NOC Problem alert via Telegram[cite: 18].
+   - Executes an internal Python automation script (`bgp_forensic.py`) directly inside the Zabbix container via `Remote Command`[cite: 18].
 3. **Forensic Harvesting:** The script establishes an on-demand SSH session (`Netmiko`) to `PE1_HN`, extracts real-time control plane tables (`show ip bgp vpnv4 all summary`) and syslog buffers (`show logging | include %BGP`).
 4. **ChatOps Ingestion:** Diagnostic logs are formatted and dispatched directly to the NOC Telegram channel within seconds of the failure.
 
-#### Pipeline Verification
+---
+
+#### Complete Incident Lifecycle Verification (4-Stage Pipeline)
+
+**Stage 1: Failure Detection (Zabbix Problem State)**
 
 <p align="center">
-  <img src="images/Screenshot 2026-10-18 160335.png" alt="Zabbix MP-iBGP Problem Detected">
+  <img src="images/Zabbix Action Execution.png" alt="MP-iBGP Session Failure Detection">
   <br>
-  <i><b>Figure 27:</b> High-severity alert triggered on PE1_HN: MP-iBGP session with PE2_HCM (10.0.0.3) is NOT Established.</i>
+  <i><b>Figure 28:</b> High-severity alert triggered on PE1_HN: MP-iBGP session to PE2_HCM (10.0.0.3) is NOT Established (Operational data: <code>idle (1)</code>).</i>
 </p>
 
-<p align="center">
-  <img src="images/Screenshot 2026-10-18 160359.png" alt="Zabbix Action Log Execution">
-  <br>
-  <i><b>Figure 28:</b> Action execution audit log: Remote command executed successfully alongside Telegram alert dispatch.</i>
-</p>
+**Stage 2: Automated Action Execution (Dual Operation)**
 
 <p align="center">
-  <img src="images/Screenshot 2026-10-18 160255.png" alt="Telegram Forensic Log Output">
+  <img src="images/Telegram Alert with BGP Forensic Logs.png" alt="Zabbix Action Execution">
   <br>
-  <i><b>Figure 29:</b> Automated Telegram dispatch containing captured Cisco IOS BGP summary and syslog evidence.</i>
+  <i><b>Figure 29:</b> Action execution audit log: Remote command executed successfully alongside Telegram alert dispatch.</i>
 </p>
+
+**Stage 3: Evidence Ingestion (ChatOps Forensic Dispatch)**
+
+<p align="center">
+  <img src="images/MP-iBGP Session Failure Detection.png" alt="Telegram Alert with BGP Forensic Logs">
+  <br>
+  <i><b>Figure 30:</b> Automated Telegram dispatch containing captured Cisco IOS BGP summary and syslog evidence.</i>
+</p>
+
+**Stage 4: Session Recovery & Incident Closure**
+
+<p align="center">
+  <img src="images/BGP Session Recovery & Incident Closure.png" alt="BGP Session Recovery and Incident Closure">
+  <br>
+  <i><b>Figure 31:</b> Incident lifecycle completion: Session restored and problem automatically transitioned to RESOLVED.</i>
+</p>
+
+---
 
 #### Root-Cause Analysis (RCA) from Forensic Payload
 
-The harvested syslog payload captured in Figure 29 pinpointed the exact root cause:
+The harvested syslog payload captured in Figure 30 pinpointed the exact root cause:
 
 ```text
 *Oct 18 16:02:31.306: %BGP-3-NOTIFICATION: received from neighbor 10.0.0.3 6/2 (Administrative Shutdown) 0 bytes 
