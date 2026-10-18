@@ -1,0 +1,17 @@
+#!/bin/bash
+# Script tự động triển khai môi trường Python vào container Zabbix Server
+
+CONTAINER_NAME="zabbix-server"
+
+echo "[*] 1. Cài đặt Python3 và công cụ biên dịch vào container Alpine..."
+docker exec -u 0 -it $CONTAINER_NAME apk add --no-cache python3 py3-pip gcc musl-dev libffi-dev
+
+echo "[*] 2. Cài đặt các thư viện Netmiko, Paramiko, Requests..."
+docker exec -u 0 -it $CONTAINER_NAME pip3 install --no-cache-dir --break-system-packages netmiko paramiko==2.12.0 requests
+
+echo "[*] 3. Copy kịch bản bgp_forensic.py vào externalscripts của Zabbix..."
+docker cp bgp_forensic.py $CONTAINER_NAME:/usr/lib/zabbix/externalscripts/bgp_forensic.py
+docker exec -u 0 -it $CONTAINER_NAME chmod 755 /usr/lib/zabbix/externalscripts/bgp_forensic.py
+
+echo "[+] Hoàn tất! Bạn có thể test chạy thử bằng lệnh:"
+echo "docker exec -it $CONTAINER_NAME python3 /usr/lib/zabbix/externalscripts/bgp_forensic.py 10.0.0.1 PE1_HN"

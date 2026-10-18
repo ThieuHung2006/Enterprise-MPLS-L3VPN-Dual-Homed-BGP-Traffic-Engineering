@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""
+BGP Forensic Dispatcher & Auto-Remediation Script
+Target: Cisco IOS / IOL
+Trigger: Zabbix Server Action via Remote Command
+"""
+
+import sys
+import requests
+from netmiko import ConnectHandler
+
+# --- THÔNG TIN CẤU HÌNH ---
+TELEGRAM_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+TELEGRAM_CHAT_ID = "YOUR_CHAT_ID_HERE"
+
+ROUTER_USERNAME = "admin"
+ROUTER_PASSWORD = "cisco_password"
+ROUTER_SECRET = "cisco_enable_secret"
+
+def send_telegram_alert(text):
+    """Gửi tin nhắn định dạng HTML về Telegram Bot"""
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TELEGRAM_CHAT_ID,
+        "text": text,
+        "parse_mode": "HTML"
+    }
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"[-] Telegram dispatch failed: {e}")
+
+def main():
+    if len(sys.argv) < 3:
+        print("Usage: python3 bgp_forensic.py <HOST_IP> <HOST_NAME>")
+        sys.exit(1)
+
+    host_ip = sys.argv[1]
+    host_name = sys.argv[2]
+
+    cisco_device = {
+        "device_type": "cisco_ios",
+        "host": host_ip,
+        "username": ROUTER_USERNAME,
+        "password": ROUTER_PASSWORD,
+        "secret": ROUTER_SECRET,
+        "conn_timeout": 10,
+    }
+
+    try:
+        # 1. Khởi tạo phiên kết nối SSH
+        net_connect = ConnectHandler(**cisco_device)
+        net_connect.enable()
+
+        # 2. Thu thập dữ liệu hiện trường (Forensic Log Extraction)
+        cmd_summary = net_connect.send_command("show ip bgp vpnv4 all summary")
+        cmd_log = net_connect.send_command("show logging | include %BGP")
+
+        # 3. Đóng phiên SSH
+        net_connect.disconnect()
+
+        # 4. Định dạng bản tin báo cáo sự cố (ChatOps)
+        message = (
+            f"🚨 <b>[AUTO FORENSIC LOG DISPATCH]</b>\n"
+            f"📍 <b>Device:</b> {host_name} (<code>{host_ip}</code>)\n"
+            f"⚠️ <b>Incident:</b> MP-iBGP Session Failure\n"
+            f"━━━━━━━━━━━━━━━━━━━\n"
+            f"<b># show ip bgp vpnv4 all summary</b>\n"
+            f"<pre>{cmd_summary}</pre>\n"
+            f"<b># show logging | include %BGP</b>\n"
+            f"<pre>{cmd_log}</pre>"
+        )
+
+        # 5. Gửi về kênh Telegram NOC
+        send_telegram_alert(message)
+        print(f"[+] Successfully harvested and dispatched forensic log for {host_name}")
+
+    except Exception as err:
+        err_msg = (
+            f"❌ <b>[FORENSIC SCRIPT ERROR]</b>\n"
+            f"Không thể kết nối SSH tới <b>{host_name}</b> ({host_ip}).\n"
+            f"Lỗi: <code>{err}</code>"
+        )
+        send_telegram_alert(err_msg)
+        print(f"[-] Error: {err}")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
