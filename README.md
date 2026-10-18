@@ -479,40 +479,10 @@ router bgp 65000
 
 To add operational visibility, the topology includes an external Network Management System (NMS): **Zabbix Server 7.0 (Docker, Alpine Linux)** together with a **Python/Netmiko script** triggered by Zabbix events. SNMP telemetry raises the alert, the script collects CLI evidence from the router, and a Telegram bot delivers both to the NOC channel. Delivery is near-real-time and bounded by the SNMP polling interval.
 
-```mermaid
-graph TD
-    subgraph ZABBIX ["Zabbix Server 7.0 (Docker Alpine)"]
-        direction LR
-        A["SNMP Poller"] -->|Evaluates| B["Trigger Engine"]
-        B -->|Fires Event| C["Action Runner"]
-    end
-
-    subgraph CISCO ["Cisco MPLS Fabric"]
-        PE1["PE1_HN / P1_Core"]
-    end
-
-    subgraph AUTOMATION ["Event-Driven Automation"]
-        PY["Python Netmiko Script<br/>bgp_forensic.py"]
-    end
-
-    subgraph CHATOPS ["ChatOps Notification"]
-        TG["Telegram Bot<br/>NOC Zabbix Alert"]
-    end
-
-    A -->|"1. SNMP Polling (OIDs)"| PE1
-    C -->|"2a. Media Type (Webhook)"| TG
-    C -->|"2b. Remote Command (Subprocess)"| PY
-    PY -->|"3. SSH CLI (show log & bgp)"| PE1
-    PY -->|"4. Dispatch Forensic Log"| TG
-
-    style ZABBIX fill:#2c3e50,stroke:#34495e,stroke-width:2px,color:#ecf0f1
-    style CISCO fill:#1b4f72,stroke:#2980b9,stroke-width:2px,color:#ffffff
-    style AUTOMATION fill:#1e8449,stroke:#27ae60,stroke-width:2px,color:#ffffff
-    style CHATOPS fill:#2874a6,stroke:#3498db,stroke-width:2px,color:#ffffff
-    style A fill:#34495e,stroke:#7f8c8d,color:#ffffff
-    style B fill:#d35400,stroke:#e67e22,color:#ffffff
-    style C fill:#c0392b,stroke:#e74c3c,color:#ffffff
-```
+<p align="center">
+  <img src="images/zabbix-automation-flow.svg" alt="Event-driven monitoring and forensics pipeline"><br>
+  <i>Event-driven monitoring and forensics pipeline: Zabbix polls SNMP, raises an alert, and a Python/Netmiko script collects BGP evidence and sends it to Telegram.</i>
+</p>
 
 ### 8.1 Physical link failure and topology state tracking
 
