@@ -514,8 +514,8 @@ The first verification scenario validates physical interface state tracking on C
 - **NOC Notification:** Telegram Bot immediately pushes operational alerts specifying host metadata and Problem IDs (`221`, `222`)[cite: 10]. Upon administrative restoration (`no shutdown`), an auto-resolution message is broadcasted confirming incident closure.
 
 <p align="center">
-  <img src="images/telegram_alert_problem.jpg" alt="Telegram Problem Alert" width="48%">
-  <img src="images/telegram_alert_resolved.jpg" alt="Telegram Resolved Alert" width="48%">
+  <img src="images/telegram_alert_problem.png" alt="Telegram Problem Alert" width="48%">
+  <img src="images/telegram_alert_resolved.png" alt="Telegram Resolved Alert" width="48%">
   <br>
   <i><b>Figure 25:</b> ChatOps Telegram notifications: (Left) Real-time Problem alerts for IDs 221 and 222[cite: 10]; (Right) Automatic incident resolution notifications upon interface recovery[cite: 11].</i>
 </p>
