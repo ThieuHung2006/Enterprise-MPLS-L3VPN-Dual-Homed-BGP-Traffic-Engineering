@@ -501,30 +501,36 @@ graph TD
 
 ### 8.1 Physical Link Failure & Topology State Tracking
 
-The first verification scenario validates physical interface state tracking on Core Router `P1_Core` (`Ethernet0/0` connecting to `PE1_HN`).
+The first verification scenario validates physical interface state tracking on Core Router `P1_Core` (`Ethernet0/0` connecting to `PE1_HN`)[cite: 10, 13].
 
 <p align="center">
   <img src="images/zabbix_map_link_failure.png" alt="Zabbix Topology Map Link Failure">
   <br>
-  <i><b>Figure 24:</b> Real-time MPLS L3VPN Core Topology map indicating an active interface disruption on P1_Core (highlighted link turned red).</i>
+  <i><b>Figure 24:</b> Real-time MPLS L3VPN Core Topology map indicating an active interface disruption on P1_Core (highlighted link turned red)[cite: 13].</i>
 </p>
 
 - **Detection:** Disabling `Ethernet0/0` triggers an immediate interface state transition (`up (1)` to `down (2)`).
-- **Incident Correlation:** The Zabbix problem engine detects two interdependent issues on `P1_Core` (`Link down` on physical `Ethernet0/0` and interface alias `Et0/0(Link to PE1_HN)`).
-- **NOC Notification:** Telegram Bot immediately pushes operational alerts specifying host metadata and Problem IDs (`221`, `222`).
+- **Incident Correlation:** The Zabbix problem engine detects two interdependent issues on `P1_Core` (`Link down` on physical `Ethernet0/0` and interface alias `Et0/0(Link to PE1_HN)`)[cite: 10, 15].
+- **NOC Notification:** Telegram Bot immediately pushes operational alerts specifying host metadata and Problem IDs (`221`, `222`)[cite: 10]. Upon administrative restoration (`no shutdown`), an auto-resolution message is broadcasted confirming incident closure.
+
+<p align="center">
+  <img src="images/telegram_alert_problem.jpg" alt="Telegram Problem Alert" width="48%">
+  <img src="images/telegram_alert_resolved.jpg" alt="Telegram Resolved Alert" width="48%">
+  <br>
+  <i><b>Figure 25:</b> ChatOps Telegram notifications: (Left) Real-time Problem alerts for IDs 221 and 222[cite: 10]; (Right) Automatic incident resolution notifications upon interface recovery[cite: 11].</i>
+</p>
 
 <p align="center">
   <img src="images/traffic_graph_link_downtime.png" alt="Traffic Graph Downtime">
   <br>
-  <i><b>Figure 25:</b> Interface traffic metrics on P1_Core Ethernet0/0 dropping sharply to 0 bps during the disruption window.</i>
+  <i><b>Figure 26:</b> Interface traffic metrics on P1_Core Ethernet0/0 dropping sharply to 0 bps during the disruption window[cite: 12].</i>
 </p>
 
 <p align="center">
   <img src="images/zabbix_map_recovered.png" alt="Zabbix Topology Map Recovered">
   <br>
-  <i><b>Figure 26:</b> Automatic recovery visualization: topology map indicators return to normal green state (OK) with active throughput rates displayed.</i>
+  <i><b>Figure 27:</b> Automatic recovery visualization: topology map indicators return to normal green state (OK) with active throughput rates displayed[cite: 14].</i>
 </p>
-
 ---
 
 ### 8.2 MP-iBGP Session Failure & Event-Driven Forensics
