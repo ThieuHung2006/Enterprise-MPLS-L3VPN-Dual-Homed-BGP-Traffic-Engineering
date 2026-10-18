@@ -18,6 +18,7 @@ A service-provider lab built around a small ISP backbone (**AS 65000**), running
 5. [BGP Traffic Engineering](#5-bgp-traffic-engineering)
 6. [Verification & Proof of Concept](#6-verification--proof-of-concept)
 7. [Known Limitations & Future Work](#7-known-limitations--future-work)
+8. [Automated Monitoring & Event-Driven Forensics](#8-automated-monitoring--event-driven-forensics)
 
 ---
 
@@ -456,3 +457,114 @@ router bgp 65000
 5. A second P router for core redundancy, which also lets LDP session protection be demonstrated.
 6. BFD on eBGP peers, with measured (not assumed) convergence times.
 7. Publish device configs in a `configs/` folder so the lab can be reproduced.
+---
+
+## 8. Automated Monitoring & Event-Driven Forensics
+
+To address operational observability, the topology integrates an external Network Management System (NMS) consisting of **Zabbix Server 7.0 (Dockerized on Alpine Linux)** paired with **Python Netmiko event-driven automation**. The pipeline bridges SNMP-based telemetry with programmatic CLI diagnostics and instant ChatOps dispatching via Telegram.
+```mermaid
+graph TD
+    subgraph ZABBIX ["Zabbix Server 7.0 (Docker Alpine)"]
+        direction LR
+        A["SNMP Poller"] -->|Evaluates| B["Trigger Engine"]
+        B -->|Fires Event| C["Action Runner"]
+    end
+
+    subgraph CISCO ["Cisco MPLS Fabric"]
+        PE1["PE1_HN / P1_Core"]
+    end
+
+    subgraph AUTOMATION ["Event-Driven Automation"]
+        PY["Python Netmiko Script<br/><code>bgp_forensic.py</code>"]
+    end
+
+    subgraph CHATOPS ["ChatOps Notification"]
+        TG["Telegram Bot<br/><b>NOC Zabbix Alert</b>"]
+    end
+
+    %% Flow connections
+    A -->|"1. SNMP Polling (OIDs)"| PE1
+    C -->|"2a. Media Type (Webhook)"| TG
+    C -->|"2b. Remote Command (Subprocess)"| PY
+    PY -->|"3. SSH CLI (show log & bgp)"| PE1
+    PY -->|"4. Dispatch Forensic Log"| TG
+
+    %% Custom Styling
+    style ZABBIX fill:#2c3e50,stroke:#34495e,stroke-width:2px,color:#ecf0f1
+    style CISCO fill:#1b4f72,stroke:#2980b9,stroke-width:2px,color:#ffffff
+    style AUTOMATION fill:#1e8449,stroke:#27ae60,stroke-width:2px,color:#ffffff
+    style CHATOPS fill:#2874a6,stroke:#3498db,stroke-width:2px,color:#ffffff
+    style A fill:#34495e,stroke:#7f8c8d,color:#ffffff
+    style B fill:#d35400,stroke:#e67e22,color:#ffffff
+    style C fill:#c0392b,stroke:#e74c3c,color:#ffffff
+```
+
+### 8.1 Physical Link Failure & Topology State Tracking
+
+The first verification scenario validates physical interface state tracking on Core Router `P1_Core` (`Ethernet0/0` connecting to `PE1_HN`).
+
+<p align="center">
+  <img src="images/zabbix_map_link_failure.png" alt="Zabbix Topology Map Link Failure">
+  <br>
+  <i><b>Figure 24:</b> Real-time MPLS L3VPN Core Topology map indicating an active interface disruption on P1_Core (highlighted link turned red).</i>
+</p>
+
+- **Detection:** Disabling `Ethernet0/0` triggers an immediate interface state transition (`up (1)` to `down (2)`).
+- **Incident Correlation:** The Zabbix problem engine detects two interdependent issues on `P1_Core` (`Link down` on physical `Ethernet0/0` and interface alias `Et0/0(Link to PE1_HN)`).
+- **NOC Notification:** Telegram Bot immediately pushes operational alerts specifying host metadata and Problem IDs (`221`, `222`).
+
+<p align="center">
+  <img src="images/traffic_graph_link_downtime.png" alt="Traffic Graph Downtime">
+  <br>
+  <i><b>Figure 25:</b> Interface traffic metrics on P1_Core Ethernet0/0 dropping sharply to 0 bps during the disruption window.</i>
+</p>
+
+<p align="center">
+  <img src="images/zabbix_map_recovered.png" alt="Zabbix Topology Map Recovered">
+  <br>
+  <i><b>Figure 26:</b> Automatic recovery visualization: topology map indicators return to normal green state (OK) with active throughput rates displayed.</i>
+</p>
+
+---
+
+### 8.2 MP-iBGP Session Failure & Event-Driven Forensics
+
+Standard monitoring typically reports that a BGP session transitioned to `Idle`, leaving engineers to manually SSH into routers to troubleshoot. This lab implements an **Event-Driven Auto-Forensic Pipeline** to automate immediate root-cause diagnosis.
+
+#### Architecture and Workflow
+
+1. **Trigger Condition:** SNMP evaluates `cbgpPeer2State` for neighbor `10.0.0.3`. When the value drops below `Established (6)`, a `High` severity problem is raised.
+2. **Dual-Action Execution:** Zabbix Action triggers two simultaneous operations:
+   - Dispatches a standard NOC Problem alert via Telegram.
+   - Executes an internal Python automation script (`bgp_forensic.py`) directly inside the Zabbix container via `Remote Command`.
+3. **Forensic Harvesting:** The script establishes an on-demand SSH session (`Netmiko`) to `PE1_HN`, extracts real-time control plane tables (`show ip bgp vpnv4 all summary`) and syslog buffers (`show logging | include %BGP`).
+4. **ChatOps Ingestion:** Diagnostic logs are formatted and dispatched directly to the NOC Telegram channel within seconds of the failure.
+
+#### Pipeline Verification
+
+<p align="center">
+  <img src="images/Screenshot 2026-10-18 160335.png" alt="Zabbix MP-iBGP Problem Detected">
+  <br>
+  <i><b>Figure 27:</b> High-severity alert triggered on PE1_HN: MP-iBGP session with PE2_HCM (10.0.0.3) is NOT Established.</i>
+</p>
+
+<p align="center">
+  <img src="images/Screenshot 2026-10-18 160359.png" alt="Zabbix Action Log Execution">
+  <br>
+  <i><b>Figure 28:</b> Action execution audit log: Remote command executed successfully alongside Telegram alert dispatch.</i>
+</p>
+
+<p align="center">
+  <img src="images/Screenshot 2026-10-18 160255.png" alt="Telegram Forensic Log Output">
+  <br>
+  <i><b>Figure 29:</b> Automated Telegram dispatch containing captured Cisco IOS BGP summary and syslog evidence.</i>
+</p>
+
+#### Root-Cause Analysis (RCA) from Forensic Payload
+
+The harvested syslog payload captured in Figure 29 pinpointed the exact root cause:
+
+```text
+*Oct 18 16:02:31.306: %BGP-3-NOTIFICATION: received from neighbor 10.0.0.3 6/2 (Administrative Shutdown) 0 bytes 
+*Oct 18 16:02:31.306: %BGP-5-NBR_RESET: Neighbor 10.0.0.3 reset (BGP Notification received)
+*Oct 18 16:02:31.306: %BGP-5-ADJCHANGE: neighbor 10.0.0.3 Down BGP Notification received
