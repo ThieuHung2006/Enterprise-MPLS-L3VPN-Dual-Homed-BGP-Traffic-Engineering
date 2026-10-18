@@ -1,11 +1,19 @@
-# MPLS L3VPN & Dual-Homed BGP Traffic Engineering Lab
+# MPLS L3VPN & BGP Traffic Engineering Lab with Zabbix Monitoring and Python Automation
 
-A service-provider lab built around a small ISP backbone (**AS 65000**), running on Cisco IOL in EVE-NG. It demonstrates two architectures:
+A service-provider lab built around a small ISP backbone (**AS 65000**), running on Cisco IOL in EVE-NG. It demonstrates three things:
 
 1. **Multi-tenant MPLS L3VPN (RFC 4364)** over a **BGP-free core**, with tenant separation extended to the customer edge using **VRF-Lite** on the CE routers.
 2. **Dual-homed eBGP edge traffic engineering** toward two upstream providers, using `LOCAL_PREF` for outbound traffic and `AS_PATH` prepending to influence inbound traffic.
+3. **Monitoring and event-driven diagnostics:** Zabbix (SNMP) raises alerts, and a Python/Netmiko script collects BGP evidence from the router and sends it to Telegram.
 
-> **Scope:** a proof-of-concept portfolio lab (4 provider routers, 2 customer edge routers, 2 simulated upstreams). It is not a production design. Gaps and planned work are listed in [section 7](#7-known-limitations--future-work).
+> **Scope:** a proof-of-concept portfolio lab (4 provider routers, 2 customer edge routers, 2 simulated upstreams and a monitoring server). It is not a production design. Gaps and planned work are listed in [section 7](#7-known-limitations--future-work).
+
+## Key Findings
+
+- **Inter-tenant route leak found and fixed.** With one shared CE per site, Tenant A prefixes appeared inside `VRF_CORP_B` on the PE. The cause was the CE's single global BGP table, not the PE VRFs. VRF-Lite on the CEs removed the leak, verified with before/after routing tables and a cross-tenant ping test ([6.4](#64-tenant-isolation-with-vrf-lite)).
+- **Transit-leak risk found at the ASBR.** A Wireshark capture showed ISP1-learned prefixes also being advertised to ISP2. A prefix-filter fix is documented but **not yet applied** ([6.7.3](#673-bgp-traffic-engineering-and-failover-isp1--isp2), [section 7](#7-known-limitations--future-work)).
+- **Packet-level proof of MPLS behavior.** Captures show the two-label stack, PHP, and the RD / Route Target in MP-iBGP updates ([6.7](#67-packet-level-analysis-wireshark)).
+- **Automated first-response diagnostics.** When the MP-iBGP session leaves `Established`, Zabbix triggers a script that gathers `show` output and syslog and posts it to Telegram. In the test, the cause (`Administrative Shutdown` from the neighbor) was identified from that message ([section 8](#8-automated-monitoring--event-driven-forensics)).
 
 ---
 
@@ -36,6 +44,8 @@ A service-provider lab built around a small ISP backbone (**AS 65000**), running
 | **Upstream peering** | `ASBR1_Core` has eBGP to `ISP1_AS100` (AS 100) and `ISP2_AS200` (AS 200) |
 | **Outbound TE** | Inbound route-map sets `LOCAL_PREF 200` on routes from ISP1 (primary egress) |
 | **Inbound TE** | Outbound route-map prepends AS 65000 three times toward ISP2 (backup ingress) |
+| **Monitoring** | Zabbix Server 7.0 (Docker, Alpine) polls interface and BGP peer state over SNMP and raises alerts |
+| **Automation** | Python/Netmiko script runs on a Zabbix action, collects BGP and syslog evidence over SSH, and posts it to Telegram |
 
 ---
 
@@ -55,6 +65,7 @@ A service-provider lab built around a small ISP backbone (**AS 65000**), running
 | **CE2_HCM** | Customer Edge (Ho Chi Minh) | - | `e0/0` trunk (`.10` = `CORP_A`, `.20` = `CORP_B`) | eBGP (AS 65002), VRF-Lite, 802.1Q |
 | **ISP1_AS100** | Primary upstream | `8.8.8.8/32` | `e0/0` to ASBR1 | eBGP (AS 100) |
 | **ISP2_AS200** | Secondary upstream | `8.8.8.8/32` | `e0/0` to ASBR1 | eBGP (AS 200) |
+| **Zabbix NMS** | Monitoring server (Docker, Alpine Linux) | - | management connection (see topology) | SNMP polling, SSH automation, Telegram alerts |
 
 > Both upstreams advertise `8.8.8.8/32` so one destination is reachable over two paths. Private ASNs and documentation ranges (`203.0.113.0/24`) are used because this is a lab.
 
@@ -440,10 +451,12 @@ router bgp 65000
 
 - No other ASBR prefix filters (bogons, RFC 1918) and no `maximum-prefix`.
 - No BGP or LDP authentication.
+- Monitoring and automation security gaps (SNMPv2c, SSH account scope) are listed in [section 8.4](#84-security-considerations).
 
 **Convergence and operations**
 - No BFD or timer tuning, so no fast-convergence claim is made.
-- No monitoring (syslog, SNMP, NetFlow) and no automated configuration management.
+- Zabbix monitoring and event-driven diagnostics are in place (section 8). Not yet implemented: NetFlow, centralized syslog, and configuration management (for example Git/Ansible).
+- The alert-to-Telegram latency has not been measured.
 
 **Design notes**
 - Both tenants share a physical CE and PE-CE link (separated by VLANs and VRF-Lite). A dedicated CE per tenant is more typical.
@@ -456,12 +469,16 @@ router bgp 65000
 4. ASBR bogon filtering and BGP authentication.
 5. A second P router for core redundancy, which also lets LDP session protection be demonstrated.
 6. BFD on eBGP peers, with measured (not assumed) convergence times.
-7. Publish device configs in a `configs/` folder so the lab can be reproduced.
+7. Move SNMP to v3 (authPriv) and restrict SSH/SNMP to the NMS address (section 8.4).
+8. Measure the time from link or session failure to the Telegram message, and record the SNMP polling interval used.
+9. Publish device configs in a `configs/` folder and the automation script in `automation/`, with all secrets removed, so the lab can be reproduced.
+
 ---
 
 ## 8. Automated Monitoring & Event-Driven Forensics
 
-To address operational observability, the topology integrates an external Network Management System (NMS) consisting of **Zabbix Server 7.0 (Dockerized on Alpine Linux)** paired with **Python Netmiko event-driven automation**. The pipeline bridges SNMP-based telemetry with programmatic CLI diagnostics and instant ChatOps dispatching via Telegram.
+To add operational visibility, the topology includes an external Network Management System (NMS): **Zabbix Server 7.0 (Docker, Alpine Linux)** together with a **Python/Netmiko script** triggered by Zabbix events. SNMP telemetry raises the alert, the script collects CLI evidence from the router, and a Telegram bot delivers both to the NOC channel. Delivery is near-real-time and bounded by the SNMP polling interval.
+
 ```mermaid
 graph TD
     subgraph ZABBIX ["Zabbix Server 7.0 (Docker Alpine)"]
@@ -475,21 +492,19 @@ graph TD
     end
 
     subgraph AUTOMATION ["Event-Driven Automation"]
-        PY["Python Netmiko Script<br/><code>bgp_forensic.py</code>"]
+        PY["Python Netmiko Script<br/>bgp_forensic.py"]
     end
 
     subgraph CHATOPS ["ChatOps Notification"]
-        TG["Telegram Bot<br/><b>NOC Zabbix Alert</b>"]
+        TG["Telegram Bot<br/>NOC Zabbix Alert"]
     end
 
-    %% Flow connections
     A -->|"1. SNMP Polling (OIDs)"| PE1
     C -->|"2a. Media Type (Webhook)"| TG
     C -->|"2b. Remote Command (Subprocess)"| PY
     PY -->|"3. SSH CLI (show log & bgp)"| PE1
     PY -->|"4. Dispatch Forensic Log"| TG
 
-    %% Custom Styling
     style ZABBIX fill:#2c3e50,stroke:#34495e,stroke-width:2px,color:#ecf0f1
     style CISCO fill:#1b4f72,stroke:#2980b9,stroke-width:2px,color:#ffffff
     style AUTOMATION fill:#1e8449,stroke:#27ae60,stroke-width:2px,color:#ffffff
@@ -499,95 +514,152 @@ graph TD
     style C fill:#c0392b,stroke:#e74c3c,color:#ffffff
 ```
 
-### 8.1 Physical Link Failure & Topology State Tracking
+### 8.1 Physical link failure and topology state tracking
 
-The first verification scenario validates physical interface state tracking on Core Router `P1_Core` (`Ethernet0/0` connecting to `PE1_HN`)[cite: 10, 13].
+The first scenario tracks the interface state of `P1_Core` `Ethernet0/0`, which connects to `PE1_HN`.
 
 <p align="center">
   <img src="images/zabbix_map_link_failure.png" alt="Zabbix Topology Map Link Failure">
   <br>
-  <i><b>Figure 24:</b> Real-time MPLS L3VPN Core Topology map indicating an active interface disruption on P1_Core (highlighted link turned red)[cite: 13].</i>
+  <i><b>Figure 24:</b> MPLS L3VPN core topology map in Zabbix showing the disrupted interface on P1_Core (the affected link is red).</i>
 </p>
 
-- **Detection:** Disabling `Ethernet0/0` triggers an immediate interface state transition (`up (1)` to `down (2)`).
-- **Incident Correlation:** The Zabbix problem engine detects two interdependent issues on `P1_Core` (`Link down` on physical `Ethernet0/0` and interface alias `Et0/0(Link to PE1_HN)`)[cite: 10, 15].
-- **NOC Notification:** Telegram Bot immediately pushes operational alerts specifying host metadata and Problem IDs (`221`, `222`)[cite: 10]. Upon administrative restoration (`no shutdown`), an auto-resolution message is broadcasted confirming incident closure.
+- **Detection:** after `Ethernet0/0` is shut down, its operational status changes from `up (1)` to `down (2)` and is picked up at the next SNMP poll.
+- **Problem correlation:** Zabbix raises two related problems on `P1_Core`: `Link down` on the physical `Ethernet0/0` and on the interface alias `Et0/0(Link to PE1_HN)`.
+- **Notification:** the Telegram bot sends the problem alerts with host details. After `no shutdown`, a resolution message confirms the incident is closed.
 
 <p align="center">
   <img src="images/telegram_alert_problem.png" alt="Telegram Problem Alert" width="48%">
   <img src="images/telegram_alert_resolved.png" alt="Telegram Resolved Alert" width="48%">
   <br>
-  <i><b>Figure 25:</b> ChatOps Telegram notifications: (Left) Real-time Problem alerts for IDs 221 and 222[cite: 10]; (Right) Automatic incident resolution notifications upon interface recovery[cite: 11].</i>
+  <i><b>Figure 25:</b> Telegram notifications. Left: problem alerts. Right: automatic resolution message after the interface recovers.</i>
 </p>
 
 <p align="center">
   <img src="images/traffic_graph_link_downtime.png" alt="Traffic Graph Downtime">
   <br>
-  <i><b>Figure 26:</b> Interface traffic metrics on P1_Core Ethernet0/0 dropping sharply to 0 bps during the disruption window[cite: 12].</i>
+  <i><b>Figure 26:</b> Traffic on P1_Core <code>Ethernet0/0</code> drops to 0 bps during the outage.</i>
 </p>
 
 <p align="center">
   <img src="images/zabbix_map_recovered.png" alt="Zabbix Topology Map Recovered">
   <br>
-  <i><b>Figure 27:</b> Automatic recovery visualization: topology map indicators return to normal green state (OK) with active throughput rates displayed[cite: 14].</i>
+  <i><b>Figure 27:</b> After recovery, the map returns to the normal (green) state and throughput is displayed again.</i>
 </p>
----
-
-### 8.2 MP-iBGP Session Failure & Event-Driven Forensics
-
-Standard monitoring typically reports that a BGP session transitioned to `Idle`, leaving engineers to manually SSH into routers to troubleshoot. This lab implements an **Event-Driven Auto-Forensic Pipeline** to automate immediate root-cause diagnosis.
-
-#### Architecture and Workflow
-1. **Trigger Condition:** SNMP evaluates `cbgpPeer2State` for neighbor `10.0.0.3`. When the value drops below `Established (6)`, a `High` severity problem is raised[cite: 19, 20].
-2. **Dual-Action Execution:** Zabbix Action triggers two simultaneous operations:
-   - Dispatches a standard NOC Problem alert via Telegram[cite: 18].
-   - Executes an internal Python automation script (`bgp_forensic.py`) directly inside the Zabbix container via `Remote Command`[cite: 18].
-3. **Forensic Harvesting:** The script establishes an on-demand SSH session (`Netmiko`) to `PE1_HN`, extracts real-time control plane tables (`show ip bgp vpnv4 all summary`) and syslog buffers (`show logging | include %BGP`).
-4. **ChatOps Ingestion:** Diagnostic logs are formatted and dispatched directly to the NOC Telegram channel within seconds of the failure.
 
 ---
 
-#### Complete Incident Lifecycle Verification (4-Stage Pipeline)
+### 8.2 MP-iBGP session failure and event-driven forensics
 
-**Stage 1: Failure Detection (Zabbix Problem State)**
+A standard monitoring alert says only that a BGP session left `Established`, and an engineer then logs in to investigate. This lab automates the first diagnostic step.
+
+#### Workflow
+
+1. **Trigger:** Zabbix polls `cbgpPeer2State` for neighbor `10.0.0.3`. When the value is not `Established (6)`, a `High` severity problem is raised.
+2. **Two actions run from the same event:**
+   - a Problem alert is sent to Telegram;
+   - the Python script `bgp_forensic.py` runs inside the Zabbix container as a `Remote Command`.
+3. **Evidence collection:** the script opens an SSH session (Netmiko) to `PE1_HN` and collects `show ip bgp vpnv4 all summary` and `show logging | include %BGP`.
+4. **Delivery:** the output is formatted and sent to the NOC Telegram channel.
+
+#### Incident lifecycle (4 stages)
+
+<!-- TODO (review): check that each image below matches its stage caption. The file names were left unchanged on purpose. -->
+
+**Stage 1: Failure detection (Zabbix problem state)**
 
 <p align="center">
   <img src="images/Zabbix Action Execution.png" alt="MP-iBGP Session Failure Detection">
   <br>
-  <i><b>Figure 28:</b> High-severity alert triggered on PE1_HN: MP-iBGP session to PE2_HCM (10.0.0.3) is NOT Established (Operational data: <code>idle (1)</code>).</i>
+  <i><b>Figure 28:</b> High-severity alert on PE1_HN: the MP-iBGP session to PE2_HCM (10.0.0.3) is not Established (operational data: <code>idle (1)</code>).</i>
 </p>
 
-**Stage 2: Automated Action Execution (Dual Operation)**
+**Stage 2: Automated actions (two operations)**
 
 <p align="center">
   <img src="images/Telegram Alert with BGP Forensic Logs.png" alt="Zabbix Action Execution">
   <br>
-  <i><b>Figure 29:</b> Action execution audit log: Remote command executed successfully alongside Telegram alert dispatch.</i>
+  <i><b>Figure 29:</b> Action log: the remote command ran successfully alongside the Telegram alert.</i>
 </p>
 
-**Stage 3: Evidence Ingestion (ChatOps Forensic Dispatch)**
+**Stage 3: Evidence delivery (Telegram)**
 
 <p align="center">
   <img src="images/MP-iBGP Session Failure Detection.png" alt="Telegram Alert with BGP Forensic Logs">
   <br>
-  <i><b>Figure 30:</b> Automated Telegram dispatch containing captured Cisco IOS BGP summary and syslog evidence.</i>
+  <i><b>Figure 30:</b> Telegram message containing the collected Cisco IOS BGP summary and syslog lines.</i>
 </p>
 
-**Stage 4: Session Recovery & Incident Closure**
+**Stage 4: Recovery and incident closure**
 
 <p align="center">
   <img src="images/BGP Session Recovery & Incident Closure.png" alt="BGP Session Recovery and Incident Closure">
   <br>
-  <i><b>Figure 31:</b> Incident lifecycle completion: Session restored and problem automatically transitioned to RESOLVED.</i>
+  <i><b>Figure 31:</b> The session is restored and the problem moves to RESOLVED automatically.</i>
 </p>
 
----
+#### Root-cause analysis from the collected evidence
 
-#### Root-Cause Analysis (RCA) from Forensic Payload
-
-The harvested syslog payload captured in Figure 30 pinpointed the exact root cause:
+The failure in this test was injected on purpose (the BGP neighbor was administratively shut down), so this is a check that the pipeline reports the right cause, not a discovery of an unknown fault. The syslog lines collected in Figure 30 show the cause:
 
 ```text
-*Oct 18 16:02:31.306: %BGP-3-NOTIFICATION: received from neighbor 10.0.0.3 6/2 (Administrative Shutdown) 0 bytes 
+*Oct 18 16:02:31.306: %BGP-3-NOTIFICATION: received from neighbor 10.0.0.3 6/2 (Administrative Shutdown) 0 bytes
 *Oct 18 16:02:31.306: %BGP-5-NBR_RESET: Neighbor 10.0.0.3 reset (BGP Notification received)
 *Oct 18 16:02:31.306: %BGP-5-ADJCHANGE: neighbor 10.0.0.3 Down BGP Notification received
+```
+
+A NOTIFICATION with code `6/2` (Cease / Administrative Shutdown) received from `10.0.0.3` means the peer closed the session deliberately. It was not a link or transport failure.
+
+### 8.3 Implementation details
+
+| Item | Value |
+| :--- | :--- |
+| Monitoring server | Zabbix Server 7.0, Docker, Alpine Linux |
+| Polling | SNMP, interval: **[TODO: fill in, e.g. 30 s]** |
+| Interface state | `ifOperStatus` (`1.3.6.1.2.1.2.2.1.8`) |
+| BGP peer state | `cbgpPeer2State` (CISCO-BGP4-MIB, `1.3.6.1.4.1.9.9.187.1.2.5.1.3`) **[TODO: verify the OID on the lab IOS image]** |
+| BGP trigger | state of peer `10.0.0.3` not equal to `6` (Established), severity High |
+| Action operations | Telegram media type (webhook) and Remote Command running `bgp_forensic.py` |
+| Automation | Python 3, Netmiko (`cisco_ios`), Telegram Bot API |
+| Files | `automation/bgp_forensic.py` (secrets excluded) |
+
+Reference excerpt of the script pattern (sanitized: all credentials come from environment variables):
+
+```python
+import os
+import requests
+from netmiko import ConnectHandler
+
+device = {
+    "device_type": "cisco_ios",
+    "host": os.environ["NET_HOST"],
+    "username": os.environ["NET_USER"],
+    "password": os.environ["NET_PASS"],
+    "timeout": 15,
+}
+commands = [
+    "show ip bgp vpnv4 all summary",
+    "show logging | include %BGP",
+]
+
+with ConnectHandler(**device) as conn:
+    output = "\n\n".join(f"$ {c}\n{conn.send_command(c)}" for c in commands)
+
+requests.post(
+    f"https://api.telegram.org/bot{os.environ['TG_TOKEN']}/sendMessage",
+    data={"chat_id": os.environ["TG_CHAT_ID"], "text": output[:4000]},
+    timeout=10,
+)
+```
+
+> Reference only. The script in the repository should follow the same pattern: no credentials, token or chat ID in the code, in screenshots, or in git history.
+
+### 8.4 Security considerations
+
+- **Secrets:** the router login, Telegram bot token, chat ID, SNMP community and Zabbix credentials are kept out of the repository. They are read from environment variables or a `.env` file listed in `.gitignore`. If a token was ever committed, revoke it in BotFather and remove it from the git history.
+- **Screenshots:** the images of Zabbix and Telegram are checked and blurred for tokens, chat IDs, usernames, phone numbers and community strings before publishing.
+- **Least privilege:** the SSH account used by the script is meant to be read-only, limited to the `show` commands the script runs (for example with AAA command authorization or a restricted privilege level), not a full administrator account.
+- **Management plane:** SSH and SNMP on the routers are limited to the NMS address with access lists.
+- **SNMP version:** the lab uses SNMP with a shared community string for simplicity. A real deployment should use **SNMPv3 with authentication and encryption**.
+- **Data leaving the network:** the Telegram message contains router output and leaves the lab through a third-party service. In production, use a private channel or a self-hosted alerting path, and keep the message content limited to what the on-call engineer needs.
+- **Input handling:** the script should not build shell commands from Zabbix macros or other external text without validating them.
