@@ -50,6 +50,16 @@ A service-provider lab built around a small ISP backbone (**AS 65000**), running
 | **Monitoring** | Zabbix Server 7.0 (Docker, Alpine) polls interface and BGP peer state over SNMP and raises alerts |
 | **Automation** | Python/Netmiko script runs on a Zabbix action, collects BGP and syslog evidence over SSH, and posts it to Telegram |
 
+**Repository layout**
+
+```text
+.
+├── README.md
+├── images/        screenshots, captures and diagrams used in this document
+├── configs/       device configurations (secrets removed)
+└── automation/    bgp_forensic.py (credentials read from environment variables)
+```
+
 ---
 
 ## 2. Topology & Addressing
@@ -113,7 +123,7 @@ The PE VRFs were not the cause. The shared CE was the bridge between the tenants
 
 ### 3.5 Key configuration excerpts
 
-> Reference excerpts built from the values documented in this README. Replace the `<...>` placeholders and adjust names to match the real device configs. The capture in Figure 21 was taken **before** the outbound prefix filter below was applied (see [6.7.3](#673-bgp-traffic-engineering-and-failover-isp1--isp2)).
+> Reference excerpts built from the values documented in this README; the full device configurations are in the `configs/` folder. Replace the `<...>` placeholders and adjust names to match the real device configs. The capture in Figure 21 was taken **before** the outbound prefix filter below was applied (see [6.7.3](#673-bgp-traffic-engineering-and-failover-isp1--isp2)).
 
 ```text
 ! PE: tenant B VRF with its own RD and RT
@@ -452,13 +462,8 @@ A continuous stream of 500 ICMP packets (`repeat 500 timeout 1`) targeted `8.8.8
 ASBR1_Core# ping 8.8.8.8 repeat 500 timeout 1
 Type escape sequence to abort.
 Sending 500, 100-byte ICMP Echos to 8.8.8.8, timeout is 1 seconds:
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!.!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+[... output shortened: 499 replies and 1 timeout in total ...]
 *Oct 18 23:35:52.211: %BFDFSM-6-BFD_SESS_DOWN: BFD session ld:4 handle:1,is going Down Reason: ECHO FAILURE
 *Oct 18 23:35:52.216: %BGP-5-NBR_RESET: Neighbor 203.0.113.2 reset (BFD adjacency down)
 *Oct 18 23:35:52.221: %BGP-5-ADJCHANGE: neighbor 203.0.113.2 Down BFD adjacency down
@@ -498,7 +503,6 @@ Limits of this test: the pings originate on `ASBR1_Core`, so it checks the ASBR'
 3. Deploy a second P router to introduce core link redundancy and demonstrate LDP session protection failover.
 4. Upgrade monitoring from SNMPv2c to SNMPv3 (authPriv).
 5. Measure the failover interruption from Wireshark timestamps (three runs), the failback to ISP1, and the alert-to-Telegram latency.
-6. Publish device configs in a `configs/` folder and the automation script in `automation/`, with all secrets removed, so the lab can be reproduced.
 
 ---
 
