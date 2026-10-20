@@ -1,5 +1,7 @@
 hostname ISP2_AS200
 !
+ip routing
+!
 interface Loopback0
  description GLOBAL_INTERNET_DESTINATION
  ip address 8.8.8.8 255.255.255.255
@@ -8,11 +10,16 @@ interface Loopback0
 interface Ethernet0/0
  description TO_ASBR1
  ip address 203.0.113.6 255.255.255.252
+ bfd interval 150 min_rx 150 multiplier 3
  no shutdown
 !
 router bgp 200
  bgp log-neighbor-changes
  network 8.8.8.8 mask 255.255.255.255
  neighbor 203.0.113.5 remote-as 65000
+ neighbor 203.0.113.5 fall-over bfd
+!
+line vty 0 4
+ login
 !
 end
