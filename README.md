@@ -11,9 +11,10 @@ A service-provider lab built around a small ISP backbone (**AS 65000**), running
 ## Key Findings
 
 - **Inter-tenant route leak found and fixed.** With one shared CE per site, Tenant A prefixes appeared inside `VRF_CORP_B` on the PE. The cause was the CE's single global BGP table, not the PE VRFs. VRF-Lite on the CEs removed the leak, verified with before/after routing tables and a cross-tenant ping test ([6.4](#64-tenant-isolation-with-vrf-lite)).
-- **Transit-leak risk found at the ASBR.** A Wireshark capture showed ISP1-learned prefixes also being advertised to ISP2. A prefix-filter fix is documented but **not yet applied** ([6.7.3](#673-bgp-traffic-engineering-and-failover-isp1--isp2), [section 7](#7-known-limitations--future-work)).
+- **Transit leak at the ASBR found and fixed.** A Wireshark capture showed `ASBR1_Core` advertising ISP1-learned prefixes (`8.8.8.8/32`, `100.0.0.0/24`) to ISP2. An outbound prefix-list (`PL_OWN_PUBLIC`) applied to both eBGP peers now limits advertisements to the owned block `203.0.113.128/25`, verified with `advertised-routes` output ([6.7.3](#673-bgp-traffic-engineering-and-failover-isp1--isp2)).
 - **Packet-level proof of MPLS behavior.** Captures show the two-label stack, PHP, and the RD / Route Target in MP-iBGP updates ([6.7](#67-packet-level-analysis-wireshark)).
 - **Automated first-response diagnostics.** When the MP-iBGP session leaves `Established`, Zabbix triggers a script that gathers `show` output and syslog and posts it to Telegram. In the test, the cause (`Administrative Shutdown` from the neighbor) was identified from that message ([section 8](#8-automated-monitoring--event-driven-forensics)).
+- **Fast failure detection with BFD.** BFD (150 ms × 3) is enabled on the OSPF underlay and the eBGP upstream sessions. In a failover test on the ISP1 link, BFD declared the session down and BGP was reset 5 ms later; 1 of 500 ICMP echoes was lost while traffic moved to ISP2, so the interruption was about one second or less (ping resolution is 1 second; see [6.7.3](#673-bgp-traffic-engineering-and-failover-isp1--isp2)).
 
 ---
 
@@ -44,6 +45,8 @@ A service-provider lab built around a small ISP backbone (**AS 65000**), running
 | **Upstream peering** | `ASBR1_Core` has eBGP to `ISP1_AS100` (AS 100) and `ISP2_AS200` (AS 200) |
 | **Outbound TE** | Inbound route-map sets `LOCAL_PREF 200` on routes from ISP1 (primary egress) |
 | **Inbound TE** | Outbound route-map prepends AS 65000 three times toward ISP2 (backup ingress) |
+| **Edge filtering** | Outbound prefix-list `PL_OWN_PUBLIC` on both eBGP peers limits advertisements to `203.0.113.128/25` |
+| **Fast failure detection** | BFD (150 ms × 3) on the OSPF underlay and the eBGP upstream sessions |
 | **Monitoring** | Zabbix Server 7.0 (Docker, Alpine) polls interface and BGP peer state over SNMP and raises alerts |
 | **Automation** | Python/Netmiko script runs on a Zabbix action, collects BGP and syslog evidence over SSH, and posts it to Telegram |
 
@@ -110,7 +113,7 @@ The PE VRFs were not the cause. The shared CE was the bridge between the tenants
 
 ### 3.5 Key configuration excerpts
 
-> Reference excerpts built from the values documented in this README. Replace the `<...>` placeholders and adjust names to match the real device configs. The ASBR excerpt shows the **intended** policy: the capture in Figure 21 shows ISP1-learned prefixes also being advertised to ISP2, so the prefix filter below was not in effect at capture time (see [section 7](#7-known-limitations--future-work)).
+> Reference excerpts built from the values documented in this README. Replace the `<...>` placeholders and adjust names to match the real device configs. The capture in Figure 21 was taken **before** the outbound prefix filter below was applied (see [6.7.3](#673-bgp-traffic-engineering-and-failover-isp1--isp2)).
 
 ```text
 ! PE: tenant B VRF with its own RD and RT
@@ -143,10 +146,26 @@ router ospf 1
 route-map RM_FROM_ISP1_IN permit 10
  set local-preference 200
 
-! ASBR: AS-path prepending toward ISP2
+! ASBR: outbound filters (own prefix only) and AS-path prepending toward ISP2
+ip prefix-list PL_OWN_PUBLIC seq 5 permit 203.0.113.128/25
+
+route-map RM_TO_ISP1_OUT permit 10
+ match ip address prefix-list PL_OWN_PUBLIC
+
 route-map RM_TO_ISP2_OUT permit 10
- match ip address prefix-list <PL_OWN_PUBLIC>
+ match ip address prefix-list PL_OWN_PUBLIC
  set as-path prepend 65000 65000 65000
+
+router bgp 65000
+ neighbor 203.0.113.2 route-map RM_TO_ISP1_OUT out
+ neighbor 203.0.113.6 route-map RM_TO_ISP2_OUT out
+
+! BFD (150 ms x 3) toward the upstreams; the same timers are used on the OSPF interfaces
+interface Ethernet0/1
+ bfd interval 150 min_rx 150 multiplier 3
+router bgp 65000
+ neighbor 203.0.113.2 fall-over bfd
+ neighbor 203.0.113.6 fall-over bfd
 ```
 
 ---
@@ -390,21 +409,28 @@ This section uses Wireshark captures to verify the MPLS label stack, PHP, MP-iBG
 
 `ASBR1_Core` has eBGP sessions with **ISP1 (`AS 100`)** and **ISP2 (`AS 200`)**. ISP1 is the primary path and ISP2 the backup.
 
-**Inbound: AS-path prepending.**
+**Inbound: AS-path prepending and route leak analysis**
 
 <p align="center">
   <img src="images/wireshark-bgp-as-path-prepend-isp2.png" alt="BGP UPDATE to ISP2 with AS-Path Prepend">
   <br>
-  <i><b>Figure 21:</b> BGP UPDATE messages from ASBR1_Core to ISP2_AS200 showing 3x AS-path prepending.</i>
+  <i><b>Figure 21:</b> Wireshark capture of BGP UPDATE messages from ASBR1_Core to ISP2_AS200 revealing 3x AS-path prepending and an unintended transit route leak.</i>
 </p>
 
-* **Path (`65000 65000 65000 65000`):** with three extra prepends, the path advertised to ISP2 is four ASNs long. Upstream speakers running standard best-path selection prefer the shorter path via ISP1, unless their own policy says otherwise.
-* **Two UPDATE messages in one TCP segment:** BGP groups prefixes that share the same path attributes.
-  * The first UPDATE carries prefixes learned from AS 100 (`8.8.8.8/32`, `100.0.0.0/24`) with the path `65000 65000 65000 65000 100`.
-  * The second UPDATE carries the locally originated block `203.0.113.128/25` with the path `65000 65000 65000 65000` and `MULTI_EXIT_DISC (MED: 0)`.
-* **Observation:** the first UPDATE shows that ISP1-learned prefixes are also being advertised to ISP2. AS 65000 could therefore act as a transit between the two upstreams. The intended policy (own prefix only) is in section 3.5, and the fix is listed in section 7.
+- **Attribute modification (`AS_PATH` type code 2):** the capture confirms the outbound route-map is executing. The `AS_PATH` attribute for the advertised routes is elongated to four ASNs (`65000 65000 65000 65000`). Upstream routers running the BGP best-path algorithm will see ISP2 as a less desirable path compared to the non-prepended path advertised to ISP1.
+- **Update packing (message grouping):** the TCP payload contains two BGP UPDATE messages packed into a single frame. BGP groups NLRI that share exactly the same path attributes:
+  * **UPDATE 1 (the transit leak):** carries foreign prefixes `8.8.8.8/32` and `100.0.0.0/24` with the path `65000 65000 65000 65000 100`.
+  * **UPDATE 2 (the owned prefix):** carries the locally originated public block `203.0.113.128/25` with the path `65000 65000 65000 65000` and an attached `MULTI_EXIT_DISC (MED: 0)`.
+- **Security resolution (prefix filtering applied):** the transit leak was removed by applying `ip prefix-list PL_OWN_PUBLIC permit 203.0.113.128/25` to both outbound route-maps (`RM_TO_ISP1_OUT` and `RM_TO_ISP2_OUT`). Later `advertised-routes` output confirms that foreign subnets are filtered and only the owned block is advertised:
 
-**Outbound: `LOCAL_PREF` and failover.** Routes from `ISP1_AS100` get `Local-Pref 200`, routes from `ISP2_AS200` keep the default `100`. Outbound behavior was checked with continuous ICMP to `8.8.8.8`, generated on `ASBR1_Core`, before and after shutting the ISP1 interface.
+<p align="center">
+  <img src="images/asbr1-bgp-prefix-filter-isp1.png" alt="BGP Advertised Routes to ISP1">
+  <img src="images/asbr1-bgp-prefix-filter-isp2.png" alt="BGP Advertised Routes to ISP2">
+  <br>
+  <i><b>Figure 21b:</b> <code>show ip bgp neighbors &lt;peer&gt; advertised-routes</code> on ASBR1_Core confirming that only <code>203.0.113.128/25</code> is advertised to ISP1 (left) and ISP2 (right).</i>
+</p>
+
+**Outbound: `LOCAL_PREF` and failover.** Routes from `ISP1_AS100` get `Local-Pref 200`, while routes from `ISP2_AS200` keep the default `100`. Outbound behavior was checked with continuous ICMP to `8.8.8.8`, generated on `ASBR1_Core`, before and after shutting the ISP1 interface.
 
 <p align="center">
   <img src="images/wireshark-failover-primary-isp1.png" alt="Normal Outbound Traffic via ISP1">
@@ -412,16 +438,37 @@ This section uses Wireshark captures to verify the MPLS label stack, PHP, MP-iBG
   <i><b>Figure 22:</b> Normal state. Outbound ICMP to 8.8.8.8 exits via the ISP1 link (source IP <code>203.0.113.1</code>).</i>
 </p>
 
-* **Primary path:** ICMP Echo Requests leave through `Ethernet0/1` (`Src: 203.0.113.1`, subnet `203.0.113.0/30`), consistent with `Local-Pref 200` making ISP1 the active next hop.
-
 <p align="center">
   <img src="images/wireshark-failover-backup-isp2.png" alt="Outbound Traffic via ISP2 after failover">
   <br>
   <i><b>Figure 23:</b> After the ISP1 interface is shut down, outbound ICMP leaves via the ISP2 link (source IP <code>203.0.113.5</code>).</i>
 </p>
 
-* **Failover:** after `Ethernet0/1` is administratively shut down, ICMP packets leave through `Ethernet0/2` (`Src: 203.0.113.5`, subnet `203.0.113.4/30`), so the traffic moved to the ISP2 path without manual changes.
-* **Limits of this test:** the interruption time and packet loss were **not measured**, so no convergence figure is claimed. Because the pings originate on `ASBR1_Core`, this checks the ASBR's own egress choice, not the return path or traffic from inside AS 65000.
+#### Empirical convergence testing
+
+A continuous stream of 500 ICMP packets (`repeat 500 timeout 1`) targeted `8.8.8.8` from `ASBR1_Core` while the active primary interface (`Ethernet0/1`) was administratively shut down:
+
+```text
+ASBR1_Core# ping 8.8.8.8 repeat 500 timeout 1
+Type escape sequence to abort.
+Sending 500, 100-byte ICMP Echos to 8.8.8.8, timeout is 1 seconds:
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!.!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+*Oct 18 23:35:52.211: %BFDFSM-6-BFD_SESS_DOWN: BFD session ld:4 handle:1,is going Down Reason: ECHO FAILURE
+*Oct 18 23:35:52.216: %BGP-5-NBR_RESET: Neighbor 203.0.113.2 reset (BFD adjacency down)
+*Oct 18 23:35:52.221: %BGP-5-ADJCHANGE: neighbor 203.0.113.2 Down BFD adjacency down
+*Oct 18 23:35:52.221: %BGP_SESSION-5-ADJCHANGE: neighbor 203.0.113.2 IPv4 Unicast topology base removed from session  BFD adjacency down
+Success rate is 99 percent (499/500), round-trip min/avg/max = 1/1/13 ms
+```
+
+BFD declared the session down (`ECHO FAILURE`) and BGP was reset 5 ms later, so the reset was triggered by BFD and not by the BGP hold timer. One echo was lost while traffic moved to ISP2. Because a lost echo costs the full 1-second timeout, this bounds the interruption to about one second or less but cannot resolve shorter values.
+
+Limits of this test: the pings originate on `ASBR1_Core`, so it checks the ASBR's egress choice, not the return path or traffic from inside AS 65000. Only the eBGP upstream failover was measured. OSPF/BFD convergence and failback to ISP1 were not, and the exact interruption time from Wireshark timestamps (last echo on the ISP1 link to first echo on the ISP2 link) is still to be recorded.
 
 ---
 
@@ -429,32 +476,15 @@ This section uses Wireshark captures to verify the MPLS label stack, PHP, MP-iBG
 
 **Redundancy**
 - Single P router and a single PE per site: no core redundancy and no link-failure test.
-- ISP failover is shown (Figures 22 and 23) but not measured: packet loss and interruption time still need to be recorded, along with the failback to ISP1.
 
 **Security and filtering**
-- **Observed (Figure 21):** `ASBR1_Core` advertises ISP1-learned prefixes to ISP2, so AS 65000 could become a transit between the two upstreams. Proposed fix, not yet applied:
-
-```text
-ip prefix-list PL_OWN_PUBLIC seq 5 permit 203.0.113.128/25
-
-route-map RM_TO_ISP2_OUT permit 10
- match ip address prefix-list PL_OWN_PUBLIC
- set as-path prepend 65000 65000 65000
-
-route-map RM_TO_ISP1_OUT permit 10
- match ip address prefix-list PL_OWN_PUBLIC
-
-router bgp 65000
- neighbor <ISP1 peer> route-map RM_TO_ISP1_OUT out
- neighbor <ISP2 peer> route-map RM_TO_ISP2_OUT out
-```
-
+- **Resolved:** `ASBR1_Core` outbound transit leakage was removed with prefix-list `PL_OWN_PUBLIC`, applied outbound to both `ISP1_AS100` and `ISP2_AS200`.
 - No other ASBR prefix filters (bogons, RFC 1918) and no `maximum-prefix`.
-- No BGP or LDP authentication.
+- No BGP or LDP MD5 authentication.
 - Monitoring and automation security gaps (SNMPv2c, SSH account scope) are listed in [section 8.4](#84-security-considerations).
 
 **Convergence and operations**
-- No BFD or timer tuning, so no fast-convergence claim is made.
+- **Resolved:** BFD (150 ms × 3) is enabled on the OSPF and eBGP boundaries; 1 of 500 echoes was lost in the ISP1 failover test. OSPF/BFD convergence and failback to ISP1 have not been measured yet.
 - Zabbix monitoring and event-driven diagnostics are in place (section 8). Not yet implemented: NetFlow, centralized syslog, and configuration management (for example Git/Ansible).
 - The alert-to-Telegram latency has not been measured.
 
@@ -463,15 +493,12 @@ router bgp 65000
 - A Route Reflector would remove the PE full-mesh requirement. Use a **dedicated RR**; running BGP on `P1_Core` would end its BGP-free role.
 
 **Next steps**
-1. Apply the outbound prefix filters above and capture the UPDATE toward ISP2 again to show only `203.0.113.128/25` is advertised.
-2. ISP1 failure and recovery test with ping loss and convergence time, using a source inside the `203.0.113.128/25` block so the return path is also tested.
-3. Overlapping address space: give both tenants the same LAN prefix at different sites and show that both VRFs keep independent routes.
-4. ASBR bogon filtering and BGP authentication.
-5. A second P router for core redundancy, which also lets LDP session protection be demonstrated.
-6. BFD on eBGP peers, with measured (not assumed) convergence times.
-7. Move SNMP to v3 (authPriv) and restrict SSH/SNMP to the NMS address (section 8.4).
-8. Measure the time from link or session failure to the Telegram message, and record the SNMP polling interval used.
-9. Publish device configs in a `configs/` folder and the automation script in `automation/`, with all secrets removed, so the lab can be reproduced.
+1. Add overlapping address space tests: configure the same customer subnet (for example `192.168.10.0/24`) in both VRFs at different sites to demonstrate routing isolation. Avoid `10.0.0.0/24`, which collides with the provider loopback range.
+2. Implement ASBR bogon filtering and BGP MD5 authentication.
+3. Deploy a second P router to introduce core link redundancy and demonstrate LDP session protection failover.
+4. Upgrade monitoring from SNMPv2c to SNMPv3 (authPriv).
+5. Measure the failover interruption from Wireshark timestamps (three runs), the failback to ISP1, and the alert-to-Telegram latency.
+6. Publish device configs in a `configs/` folder and the automation script in `automation/`, with all secrets removed, so the lab can be reproduced.
 
 ---
 
