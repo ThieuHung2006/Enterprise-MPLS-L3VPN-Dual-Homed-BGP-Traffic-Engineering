@@ -1,8 +1,11 @@
 !
 hostname P1_Core
 !
+ip routing
+!
 mpls ip propagate-ttl
 mpls ip ttl-expiration pop 1
+mpls ldp router-id Loopback0 force
 mpls ldp session protection
 !
 interface Loopback0
@@ -11,26 +14,38 @@ interface Loopback0
 !
 ! Cổng nối sang PE1_HN
 interface Ethernet0/0
+ description TO_PE1_HN
  ip address 172.16.12.2 255.255.255.252
- mpls ip
- mpls ldp discovery transport-address interface
  ip ospf 1 area 0
+ mpls ip
+ bfd interval 150 min_rx 150 multiplier 3
+ no shutdown
 !
 ! Cổng nối sang PE2_HCM
 interface Ethernet0/1
+ description TO_PE2_HCM
  ip address 172.16.23.1 255.255.255.252
- mpls ip
  ip ospf 1 area 0
+ mpls ip
+ bfd interval 150 min_rx 150 multiplier 3
+ no shutdown
 !
 ! Cổng nối sang ASBR1_Core
 interface Ethernet0/2
+ description TO_ASBR1_CORE
  ip address 172.16.24.1 255.255.255.252
- mpls ip
  ip ospf 1 area 0
+ mpls ip
+ bfd interval 150 min_rx 150 multiplier 3
+ no shutdown
 !
 router ospf 1
  router-id 10.0.0.2
  mpls ldp sync
  mpls ldp autoconfig area 0
+ bfd all-interfaces
+!
+line vty 0 4
+ login
 !
 end
